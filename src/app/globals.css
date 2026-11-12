@@ -38,6 +38,37 @@ body {
   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.6), 0 0 20px rgba(101, 240, 0, 0.12);
 }
 
+/* Hide scrollbars across all browsers */
+.no-scrollbar {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
+  width: 0;
+  height: 0;
+}
+
+/* Global sleek dark scrollbar so no default white Windows scrollbars appear */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #303630 transparent;
+}
+*::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: #303630;
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #65F000;
+}
+
 /* Subtle luxury automotive carbon mesh pattern */
 .bg-carbon-mesh {
   background-color: #080B09;

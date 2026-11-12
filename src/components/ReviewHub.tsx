@@ -122,6 +122,14 @@ export default function ReviewHub() {
     }
   }, []);
 
+  // Auto-resize review textarea to eliminate scrollbars completely
+  useEffect(() => {
+    if (reviewTextareaRef.current) {
+      reviewTextareaRef.current.style.height = "auto";
+      reviewTextareaRef.current.style.height = `${Math.max(88, reviewTextareaRef.current.scrollHeight)}px`;
+    }
+  }, [generatedReview]);
+
   // Save review state to sessionStorage temporarily
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -197,8 +205,8 @@ export default function ReviewHub() {
         language === "hi"
           ? "कृपया आगे बढ़ने के लिए 1 से 5 स्टार रेटिंग चुनें।"
           : language === "hinglish"
-          ? "Please pehle 1 se 5 star rating select karein."
-          : "Please select a star rating (1 to 5) to generate your reviews."
+            ? "Please pehle 1 se 5 star rating select karein."
+            : "Please select a star rating (1 to 5) to generate your reviews."
       );
       return;
     }
@@ -371,8 +379,8 @@ export default function ReviewHub() {
       language === "hi"
         ? "अपनी कार के लिए हम पर विश्वास जताने हेतु धन्यवाद! अपना अनुभव साझा करें।"
         : language === "hinglish"
-        ? "Thank you for trusting us with your car! Share your experience."
-        : "Thank you for trusting us with your car! Share your experience.",
+          ? "Thank you for trusting us with your car! Share your experience."
+          : "Thank you for trusting us with your car! Share your experience.",
     servicesLabel:
       language === "hi" ? "प्राप्त सेवाएं चुनें (मल्टी-सेलेक्ट)" : "Select Services Received",
     servicesSubtitle:
@@ -389,8 +397,8 @@ export default function ReviewHub() {
       language === "hi"
         ? "उदा. मेरी Harrier का काम बहुत शानदार हुआ, टीम समय पर थी..."
         : language === "hinglish"
-        ? "e.g. Got my Harrier detailed, finish was unbelievable..."
-        : "e.g. Brought my Harrier in, outstanding work and edge finish...",
+          ? "e.g. Got my Harrier detailed, finish was unbelievable..."
+          : "e.g. Brought my Harrier in, outstanding work and edge finish...",
     btnGenerate:
       language === "hi"
         ? "✦ 6 रिव्यू विकल्प बनाएं"
@@ -436,7 +444,7 @@ export default function ReviewHub() {
           THE SINGLE MAIN CARD (All elements inside one container)
          ======================================================== */}
       <div className="w-full max-w-[480px] bg-[#121614] border border-[#65F000]/30 rounded-3xl p-4 sm:p-6 shadow-[0_12px_45px_rgba(0,0,0,0.85),0_0_35px_rgba(101,240,0,0.12)] flex flex-col gap-4 sm:gap-5 relative overflow-hidden backdrop-blur-md">
-        
+
         {/* Subtle Ambient Green Glow */}
         <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-64 h-32 bg-[#65F000]/15 blur-3xl pointer-events-none rounded-full" />
 
@@ -473,11 +481,10 @@ export default function ReviewHub() {
                 key={lang}
                 type="button"
                 onClick={() => setLanguage(lang)}
-                className={`min-h-[32px] px-3 py-1 rounded-full text-xs font-bold transition-all duration-150 cursor-pointer ${
-                  language === lang
-                    ? "bg-[#65F000] text-black shadow-sm"
-                    : "text-neutral-400 hover:text-white hover:bg-[#1E2521]"
-                }`}
+                className={`min-h-[32px] px-3 py-1 rounded-full text-xs font-bold transition-all duration-150 cursor-pointer ${language === lang
+                  ? "bg-[#65F000] text-black shadow-sm"
+                  : "text-neutral-400 hover:text-white hover:bg-[#1E2521]"
+                  }`}
               >
                 {lang === "en" ? "English" : lang === "hi" ? "हिंदी" : "Hinglish"}
               </button>
@@ -509,18 +516,16 @@ export default function ReviewHub() {
                   key={s.id}
                   type="button"
                   onClick={() => handleToggleService(s.name)}
-                  className={`min-h-[34px] px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all duration-150 flex items-center gap-1.5 cursor-pointer border ${
-                    isSelected
-                      ? "bg-[#65F000]/15 border-[#65F000] text-[#65F000] shadow-[0_0_10px_rgba(101,240,0,0.25)] ring-1 ring-[#65F000]/60"
-                      : "bg-[#080B09]/80 border-[#303630] text-neutral-300 hover:border-neutral-500 hover:text-white"
-                  }`}
+                  className={`min-h-[34px] px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all duration-150 flex items-center gap-1.5 cursor-pointer border ${isSelected
+                    ? "bg-[#65F000]/15 border-[#65F000] text-[#65F000] shadow-[0_0_10px_rgba(101,240,0,0.25)] ring-1 ring-[#65F000]/60"
+                    : "bg-[#080B09]/80 border-[#303630] text-neutral-300 hover:border-neutral-500 hover:text-white"
+                    }`}
                 >
                   <span
-                    className={`w-3.5 h-3.5 rounded-sm flex items-center justify-center text-[10px] border ${
-                      isSelected
-                        ? "bg-[#65F000] text-black border-[#65F000]"
-                        : "border-[#303630] text-transparent"
-                    }`}
+                    className={`w-3.5 h-3.5 rounded-sm flex items-center justify-center text-[10px] border ${isSelected
+                      ? "bg-[#65F000] text-black border-[#65F000]"
+                      : "border-[#303630] text-transparent"
+                      }`}
                   >
                     ✓
                   </span>
@@ -544,7 +549,7 @@ export default function ReviewHub() {
             </span>
           </div>
 
-          <div className="flex flex-wrap gap-1.5 sm:gap-2 max-h-[160px] overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:#303630_transparent]">
+          <div className="flex flex-wrap gap-1.5 sm:gap-2 max-h-[160px] overflow-y-auto pr-1 no-scrollbar">
             {ALL_EXPERIENCES.map((e: ExperienceItem) => {
               const isSelected = selectedExperiences.includes(e.name);
               return (
@@ -552,18 +557,16 @@ export default function ReviewHub() {
                   key={e.id}
                   type="button"
                   onClick={() => handleToggleExperience(e.name)}
-                  className={`min-h-[32px] px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all duration-150 flex items-center gap-1.5 cursor-pointer border ${
-                    isSelected
-                      ? "bg-[#65F000]/15 border-[#65F000] text-[#65F000] shadow-[0_0_8px_rgba(101,240,0,0.2)] ring-1 ring-[#65F000]/60"
-                      : "bg-[#080B09]/60 border-[#303630] text-neutral-400 hover:text-white hover:border-neutral-500"
-                  }`}
+                  className={`min-h-[32px] px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all duration-150 flex items-center gap-1.5 cursor-pointer border ${isSelected
+                    ? "bg-[#65F000]/15 border-[#65F000] text-[#65F000] shadow-[0_0_8px_rgba(101,240,0,0.2)] ring-1 ring-[#65F000]/60"
+                    : "bg-[#080B09]/60 border-[#303630] text-neutral-400 hover:text-white hover:border-neutral-500"
+                    }`}
                 >
                   <span
-                    className={`w-3 h-3 rounded-sm flex items-center justify-center text-[9px] border ${
-                      isSelected
-                        ? "bg-[#65F000] text-black border-[#65F000]"
-                        : "border-[#303630] text-transparent"
-                    }`}
+                    className={`w-3 h-3 rounded-sm flex items-center justify-center text-[9px] border ${isSelected
+                      ? "bg-[#65F000] text-black border-[#65F000]"
+                      : "border-[#303630] text-transparent"
+                      }`}
                   >
                     ✓
                   </span>
@@ -597,11 +600,10 @@ export default function ReviewHub() {
                   aria-label={`${star} Star Rating`}
                 >
                   <Star
-                    className={`w-9 h-9 sm:w-10 sm:h-10 transition-colors duration-150 ${
-                      active
-                        ? "text-[#65F000] fill-[#65F000] drop-shadow-[0_0_8px_rgba(101,240,0,0.6)]"
-                        : "text-[#303630] hover:text-neutral-500"
-                    }`}
+                    className={`w-9 h-9 sm:w-10 sm:h-10 transition-colors duration-150 ${active
+                      ? "text-[#65F000] fill-[#65F000] drop-shadow-[0_0_8px_rgba(101,240,0,0.6)]"
+                      : "text-[#303630] hover:text-neutral-500"
+                      }`}
                   />
                 </button>
               );
@@ -626,7 +628,7 @@ export default function ReviewHub() {
             value={experienceText}
             onChange={(e) => setExperienceText(e.target.value)}
             placeholder={t.feedbackPlaceholder}
-            className="w-full bg-[#080B09] border border-[#303630] rounded-xl p-3 text-xs sm:text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-[#65F000] transition-colors resize-none leading-relaxed"
+            className="w-full bg-[#080B09] border border-[#303630] rounded-xl p-3 text-xs sm:text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-[#65F000] transition-colors resize-none leading-relaxed no-scrollbar"
           />
         </div>
 
@@ -664,7 +666,7 @@ export default function ReviewHub() {
            ======================================================== */}
         {suggestions.length > 0 && (
           <div className="flex flex-col gap-3 pt-3 border-t border-[#303630]/60 animate-in fade-in slide-in-from-bottom-2 duration-200">
-            
+
             {/* Header: Title, Position (1/6), and Desktop/Tap Arrows */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -709,26 +711,23 @@ export default function ReviewHub() {
                     <div
                       key={sug.id}
                       onClick={() => handleSelectSuggestion(sug, idx)}
-                      className={`shrink-0 w-[84%] sm:w-[86%] snap-center rounded-2xl p-4 flex flex-col justify-between transition-all duration-200 cursor-pointer text-left border ${
-                        isSelected
-                          ? "bg-[#080B09] border-[#65F000] shadow-[0_0_20px_rgba(101,240,0,0.22)] ring-1 ring-[#65F000]"
-                          : "bg-[#080B09]/80 border-[#303630] hover:border-neutral-500"
-                      }`}
+                      className={`shrink-0 w-[84%] sm:w-[86%] snap-center rounded-2xl p-4 flex flex-col justify-between transition-all duration-200 cursor-pointer text-left border ${isSelected
+                        ? "bg-[#080B09] border-[#65F000] shadow-[0_0_20px_rgba(101,240,0,0.22)] ring-1 ring-[#65F000]"
+                        : "bg-[#080B09]/80 border-[#303630] hover:border-neutral-500"
+                        }`}
                     >
                       {/* Card Header: Style Name & Selection Pill */}
                       <div className="flex items-center justify-between w-full mb-2">
                         <div className="flex items-center gap-1.5">
                           <span
-                            className={`w-4 h-4 rounded-full text-[10px] font-black flex items-center justify-center ${
-                              isSelected ? "bg-[#65F000] text-black" : "bg-[#1E2521] text-neutral-400"
-                            }`}
+                            className={`w-4 h-4 rounded-full text-[10px] font-black flex items-center justify-center ${isSelected ? "bg-[#65F000] text-black" : "bg-[#1E2521] text-neutral-400"
+                              }`}
                           >
                             {sug.id}
                           </span>
                           <span
-                            className={`text-[11px] font-black uppercase tracking-wider ${
-                              isSelected ? "text-[#65F000]" : "text-neutral-400"
-                            }`}
+                            className={`text-[11px] font-black uppercase tracking-wider ${isSelected ? "text-[#65F000]" : "text-neutral-400"
+                              }`}
                           >
                             {sug.styleLabel}
                           </span>
@@ -762,11 +761,10 @@ export default function ReviewHub() {
                             e.stopPropagation();
                             handleSelectSuggestion(sug, idx);
                           }}
-                          className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition-colors cursor-pointer ${
-                            isSelected
-                              ? "bg-[#65F000] text-black"
-                              : "bg-[#1E2521] text-neutral-300 hover:text-white hover:bg-[#252f2a]"
-                          }`}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition-colors cursor-pointer ${isSelected
+                            ? "bg-[#65F000] text-black"
+                            : "bg-[#1E2521] text-neutral-300 hover:text-white hover:bg-[#252f2a]"
+                            }`}
                         >
                           {isSelected ? t.selectedBadge : t.selectThisReview}
                         </button>
@@ -783,11 +781,10 @@ export default function ReviewHub() {
                     key={s.id}
                     type="button"
                     onClick={() => scrollToCard(idx)}
-                    className={`h-1.5 rounded-full transition-all duration-200 cursor-pointer ${
-                      carouselIndex === idx
-                        ? "w-5 bg-[#65F000]"
-                        : "w-1.5 bg-[#303630] hover:bg-neutral-500"
-                    }`}
+                    className={`h-1.5 rounded-full transition-all duration-200 cursor-pointer ${carouselIndex === idx
+                      ? "w-5 bg-[#65F000]"
+                      : "w-1.5 bg-[#303630] hover:bg-neutral-500"
+                      }`}
                     aria-label={`Go to review option ${idx + 1}`}
                   />
                 ))}
@@ -821,10 +818,14 @@ export default function ReviewHub() {
                 <textarea
                   ref={reviewTextareaRef}
                   id={reviewResultId}
-                  rows={3}
                   value={generatedReview}
-                  onChange={(e) => setGeneratedReview(e.target.value)}
-                  className="w-full bg-[#080B09] border border-[#303630] rounded-xl p-3 text-xs sm:text-sm text-white leading-relaxed focus:outline-none focus:border-[#65F000] transition-colors resize-none"
+                  onChange={(e) => {
+                    setGeneratedReview(e.target.value);
+                    e.target.style.height = "auto";
+                    e.target.style.height = `${Math.max(88, e.target.scrollHeight)}px`;
+                  }}
+                  className="w-full bg-[#080B09] border border-[#303630] rounded-xl p-3 text-xs sm:text-sm text-white leading-relaxed focus:outline-none focus:border-[#65F000] transition-colors resize-none overflow-hidden no-scrollbar"
+                  style={{ minHeight: "88px" }}
                 />
 
                 {/* Regenerate All 6 Quick Action */}
