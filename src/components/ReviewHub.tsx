@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useId } from "react";
+import React, { useState, useEffect, useId, useRef } from "react";
 import Image from "next/image";
 import QRCode from "qrcode";
 import {
@@ -13,11 +13,15 @@ import {
   Sparkles,
   ClipboardPaste,
   Send,
+  AlertCircle,
+  RotateCcw,
 } from "lucide-react";
 import { COMPACT_SERVICES, BUSINESS_CONFIG, CompactService } from "@/lib/services-data";
 import NfcCardPrintable from "./NfcCardPrintable";
 
 type Language = "en" | "hi" | "hinglish";
+
+const SESSION_STORAGE_KEY = "3d_car_care_session_review";
 
 export default function ReviewHub() {
   const [language, setLanguage] = useState<Language>("en");
@@ -41,8 +45,9 @@ export default function ReviewHub() {
 
   const experienceInputId = useId();
   const reviewResultId = useId();
+  const reviewTextareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Restore state across browser tabs & app switching
+  // Restore state across browser tabs using sessionStorage (temporary, not permanent)
   useEffect(() => {
     if (typeof window !== "undefined") {
       setYear(new Date().getFullYear());
@@ -56,18 +61,19 @@ export default function ReviewHub() {
         setLanguage("hi");
       }
 
-      // Restore saved review state when customer returns from Google Maps tab
+      // Restore temporary session review state (survives tab switching in same session)
       try {
-        const saved = localStorage.getItem("3d_car_care_saved_review");
+        const saved = sessionStorage.getItem(SESSION_STORAGE_KEY);
         if (saved) {
           const parsed = JSON.parse(saved);
           if (parsed.review) setGeneratedReview(parsed.review);
           if (parsed.rating) setRating(parsed.rating);
           if (parsed.service) setSelectedService(parsed.service);
           if (parsed.experienceText) setExperienceText(parsed.experienceText);
+          if (parsed.hasOpenedGoogle) setHasOpenedGoogle(parsed.hasOpenedGoogle);
         }
       } catch (e) {
-        console.warn("Storage restore error:", e);
+        console.warn("Session storage restore error:", e);
       }
 
       // Generate high-resolution QR with pristine high-contrast optical quiet zones
@@ -85,24 +91,43 @@ export default function ReviewHub() {
     }
   }, []);
 
-  // Save review state to localStorage so it is preserved across tabs/app switching
+  // Save review state to sessionStorage temporarily
   useEffect(() => {
-    if (typeof window !== "undefined" && generatedReview) {
+    if (typeof window !== "undefined") {
       try {
-        localStorage.setItem(
-          "3d_car_care_saved_review",
-          JSON.stringify({
-            review: generatedReview,
-            rating,
-            service: selectedService,
-            experienceText,
-          })
-        );
+        if (generatedReview) {
+          sessionStorage.setItem(
+            SESSION_STORAGE_KEY,
+            JSON.stringify({
+              review: generatedReview,
+              rating,
+              service: selectedService,
+              experienceText,
+              hasOpenedGoogle,
+            })
+          );
+        }
       } catch (e) {
-        console.warn("Storage save error:", e);
+        console.warn("Session storage save error:", e);
       }
     }
-  }, [generatedReview, rating, selectedService, experienceText]);
+  }, [generatedReview, rating, selectedService, experienceText, hasOpenedGoogle]);
+
+  const handleClearDraft = () => {
+    setGeneratedReview("");
+    setExperienceText("");
+    setRating(0);
+    setHasOpenedGoogle(false);
+    setCopied(false);
+    setClipboardFailed(false);
+    try {
+      if (typeof window !== "undefined") {
+        sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore
+    }
+  };
 
   const handleGenerateReview = async () => {
     setErrorMessage("");
@@ -167,38 +192,63 @@ export default function ReviewHub() {
     }
   };
 
-  // Best one-tap workflow: Copies review text & opens official Google review page immediately
-  const handleCopyAndOpenGoogle = async () => {
-    if (!generatedReview) return;
+  /**
+   * Synchronous native navigation trigger:
+   * Called on the click of an <a> anchor tag with target="_blank".
+   * This guarantees 100% prevention of popup-blocking on iPhone Safari & Android Chrome,
+   * while synchronously executing clipboard copy of the EXACT current edited review.
+   */
+  const handleAnchorClick = () => {
+    // 1. Get the exact live edited text from the textarea or state
+    const exactEditedText = reviewTextareaRef.current?.value || generatedReview;
+    if (!exactEditedText) return;
+
     let copiedOk = false;
 
-    try {
-      await navigator.clipboard.writeText(generatedReview);
-      copiedOk = true;
-    } catch {
-      copiedOk = fallbackCopyText(generatedReview);
+    // 2. Perform copy operation without awaiting a promise so the click gesture stays immediate
+    if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard
+        .writeText(exactEditedText)
+        .then(() => {
+          setCopied(true);
+          setClipboardFailed(false);
+        })
+        .catch(() => {
+          // If navigator.clipboard fails or permission is denied, use fallback
+          const ok = fallbackCopyText(exactEditedText);
+          setCopied(ok);
+          setClipboardFailed(!ok);
+        });
+    } else {
+      copiedOk = fallbackCopyText(exactEditedText);
+      setCopied(copiedOk);
+      setClipboardFailed(!copiedOk);
     }
 
-    setCopied(copiedOk);
-    setClipboardFailed(!copiedOk);
     setHasOpenedGoogle(true);
-
-    // Open official Google review composer in a new tab immediately
-    window.open(BUSINESS_CONFIG.googleReviewWriteUrl, "_blank", "noopener,noreferrer");
   };
 
-  const handleManualCopy = async () => {
-    if (!generatedReview) return;
+  const handleManualCopy = () => {
+    const exactEditedText = reviewTextareaRef.current?.value || generatedReview;
+    if (!exactEditedText) return;
+
     let copiedOk = false;
-    try {
-      await navigator.clipboard.writeText(generatedReview);
-      copiedOk = true;
-    } catch {
-      copiedOk = fallbackCopyText(generatedReview);
-    }
-    setCopied(copiedOk);
-    if (copiedOk) {
-      setClipboardFailed(false);
+    if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard
+        .writeText(exactEditedText)
+        .then(() => {
+          setCopied(true);
+          setClipboardFailed(false);
+        })
+        .catch(() => {
+          copiedOk = fallbackCopyText(exactEditedText);
+          setCopied(copiedOk);
+          setClipboardFailed(!copiedOk);
+        });
+    } else {
+      copiedOk = fallbackCopyText(exactEditedText);
+      setCopied(copiedOk);
+      setClipboardFailed(!copiedOk);
     }
   };
 
@@ -286,6 +336,8 @@ export default function ReviewHub() {
         : language === "hinglish"
         ? "Regenerate"
         : "Regenerate",
+    clearDraft:
+      language === "hi" ? "नया शुरू करें" : "Start New",
   };
 
   return (
@@ -474,7 +526,7 @@ export default function ReviewHub() {
         </div>
 
         {/* ========================================================
-            3. REVIEW RESULT CARD (SMOOTH REVEAL + ONE-TAP WORKFLOW)
+            3. REVIEW RESULT CARD (SMOOTH REVEAL + ZERO POPUP BLOCK ONE-TAP WORKFLOW)
            ======================================================== */}
         {generatedReview && (
           <section className="bg-[#151A17] border-2 border-[#65F000] rounded-2xl p-4 sm:p-5 shadow-[0_0_25px_rgba(101,240,0,0.2)] animate-in fade-in slide-in-from-bottom-3 duration-200 flex flex-col gap-3">
@@ -482,14 +534,26 @@ export default function ReviewHub() {
               <span className="text-xs font-black uppercase text-[#65F000] tracking-wider">
                 {t.reviewResultLabel}
               </span>
-              <div className="flex text-[#65F000]">
-                {Array.from({ length: rating || 5 }).map((_, i) => (
-                  <Star key={i} className="w-3.5 h-3.5 fill-[#65F000]" />
-                ))}
+              <div className="flex items-center gap-2">
+                <div className="flex text-[#65F000]">
+                  {Array.from({ length: rating || 5 }).map((_, i) => (
+                    <Star key={i} className="w-3.5 h-3.5 fill-[#65F000]" />
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleClearDraft}
+                  title="Clear review"
+                  className="p-1 rounded-md text-neutral-400 hover:text-white hover:bg-[#080B09] transition-colors"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                </button>
               </div>
             </div>
 
+            {/* Live Editable Textarea */}
             <textarea
+              ref={reviewTextareaRef}
               id={reviewResultId}
               rows={3}
               value={generatedReview}
@@ -497,16 +561,22 @@ export default function ReviewHub() {
               className="w-full bg-[#080B09] border border-[#303630] rounded-xl p-3 text-xs sm:text-sm text-white leading-relaxed focus:outline-none focus:border-[#65F000] transition-colors resize-none"
             />
 
-            {/* ONE PRIMARY BUTTON: COPY & OPEN GOOGLE REVIEW */}
-            <button
-              type="button"
-              onClick={handleCopyAndOpenGoogle}
-              className="w-full min-h-[50px] py-3.5 px-4 rounded-xl font-black text-xs sm:text-sm text-black bg-[#65F000] hover:bg-[#70FF00] active:scale-[0.99] transition-all flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(101,240,0,0.35)] cursor-pointer"
+            {/* 
+              ONE PRIMARY ANCHOR BUTTON: 
+              Using an <a> element with target="_blank" guarantees native synchronous opening 
+              without being blocked by popup blockers on iPhone Safari or Android Chrome.
+            */}
+            <a
+              href={BUSINESS_CONFIG.googleReviewWriteUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={handleAnchorClick}
+              className="w-full min-h-[50px] py-3.5 px-4 rounded-xl font-black text-xs sm:text-sm text-black bg-[#65F000] hover:bg-[#70FF00] active:scale-[0.99] transition-all flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(101,240,0,0.35)] cursor-pointer text-center no-underline"
             >
               <Copy className="w-4 h-4 stroke-[2.5]" />
               <span className="tracking-wide uppercase">{t.btnCopyAndOpenGoogle}</span>
               <ExternalLink className="w-4 h-4 stroke-[2.5]" />
-            </button>
+            </a>
 
             {/* SUCCESS BANNER & 3-STEP VISUAL INSTRUCTIONS */}
             {hasOpenedGoogle && (
@@ -550,22 +620,23 @@ export default function ReviewHub() {
               </div>
             )}
 
-            {/* FALLBACK IF CLIPBOARD ACCESS IS DENIED OR FAILED */}
+            {/* FALLBACK IF CLIPBOARD ACCESS IS RESTRICTED BY BROWSER */}
             {clipboardFailed && (
-              <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-amber-950/60 border border-amber-800 text-left">
-                <span className="text-xs font-bold text-amber-300">
-                  Clipboard access was restricted by your browser.
-                </span>
-                <div className="flex items-center gap-2">
+              <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-amber-950/60 border border-amber-800 text-left animate-in fade-in duration-150">
+                <div className="flex items-center gap-1.5 text-amber-300 text-xs font-bold">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>Clipboard write restricted by browser</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 mt-0.5">
                   <button
                     type="button"
                     onClick={handleManualCopy}
-                    className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs"
+                    className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs cursor-pointer"
                   >
                     {copied ? "Copied!" : "Manual Copy Text"}
                   </button>
                   <span className="text-[11px] text-neutral-300">
-                    or tap & hold inside the box above to copy.
+                    or long-press inside the box above to copy.
                   </span>
                 </div>
               </div>
