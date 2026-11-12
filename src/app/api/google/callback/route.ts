@@ -132,3 +132,4 @@ function renderHtmlPage(title: string, content: string, success: boolean): strin
 </html>
   `;
 }
+

@@ -1,28 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateCustomerReview, GenerateReviewInput } from "@/lib/openai";
+import { generateCustomerReview, SimplifiedReviewInput } from "@/lib/openai";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    const rating = Number(body.rating) || 5;
-    const services = Array.isArray(body.services) ? body.services : [];
-    const likedAspects = Array.isArray(body.likedAspects) ? body.likedAspects : [];
-    const customLiked = typeof body.customLiked === "string" ? body.customLiked : "";
-    const additionalFeedback =
-      typeof body.additionalFeedback === "string" ? body.additionalFeedback : "";
-    const vehicleModel = typeof body.vehicleModel === "string" ? body.vehicleModel : "";
+    const rating = Number(body.rating);
+    if (!rating || rating < 1 || rating > 5) {
+      return NextResponse.json(
+        { success: false, error: "Please select a star rating (1 to 5 stars)." },
+        { status: 400 }
+      );
+    }
+
+    const service = typeof body.service === "string" && body.service.trim() ? body.service.trim() : "Detailing";
+    const feedback = typeof body.feedback === "string" ? body.feedback.trim() : "";
     const language = ["en", "hi", "hinglish"].includes(body.language)
       ? (body.language as "en" | "hi" | "hinglish")
       : "en";
 
-    const input: GenerateReviewInput = {
+    const input: SimplifiedReviewInput = {
+      service,
       rating,
-      services,
-      likedAspects,
-      customLiked,
-      additionalFeedback,
-      vehicleModel,
+      feedback,
       language,
     };
 
