@@ -11,6 +11,8 @@ import {
   CheckCircle2,
   RefreshCw,
   Sparkles,
+  ClipboardPaste,
+  Send,
 } from "lucide-react";
 import { COMPACT_SERVICES, BUSINESS_CONFIG, CompactService } from "@/lib/services-data";
 import NfcCardPrintable from "./NfcCardPrintable";
@@ -27,6 +29,8 @@ export default function ReviewHub() {
   const [generatedReview, setGeneratedReview] = useState<string>("");
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
+  const [hasOpenedGoogle, setHasOpenedGoogle] = useState<boolean>(false);
+  const [clipboardFailed, setClipboardFailed] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string>("");
 
   // QR Code & Printable NFC state
@@ -38,7 +42,7 @@ export default function ReviewHub() {
   const experienceInputId = useId();
   const reviewResultId = useId();
 
-  // Detect browser language & determine permanent URL
+  // Restore state across browser tabs & app switching
   useEffect(() => {
     if (typeof window !== "undefined") {
       setYear(new Date().getFullYear());
@@ -50,6 +54,20 @@ export default function ReviewHub() {
       const navLang = navigator.language?.toLowerCase() || "";
       if (navLang.startsWith("hi")) {
         setLanguage("hi");
+      }
+
+      // Restore saved review state when customer returns from Google Maps tab
+      try {
+        const saved = localStorage.getItem("3d_car_care_saved_review");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed.review) setGeneratedReview(parsed.review);
+          if (parsed.rating) setRating(parsed.rating);
+          if (parsed.service) setSelectedService(parsed.service);
+          if (parsed.experienceText) setExperienceText(parsed.experienceText);
+        }
+      } catch (e) {
+        console.warn("Storage restore error:", e);
       }
 
       // Generate high-resolution QR with pristine high-contrast optical quiet zones
@@ -67,6 +85,25 @@ export default function ReviewHub() {
     }
   }, []);
 
+  // Save review state to localStorage so it is preserved across tabs/app switching
+  useEffect(() => {
+    if (typeof window !== "undefined" && generatedReview) {
+      try {
+        localStorage.setItem(
+          "3d_car_care_saved_review",
+          JSON.stringify({
+            review: generatedReview,
+            rating,
+            service: selectedService,
+            experienceText,
+          })
+        );
+      } catch (e) {
+        console.warn("Storage save error:", e);
+      }
+    }
+  }, [generatedReview, rating, selectedService, experienceText]);
+
   const handleGenerateReview = async () => {
     setErrorMessage("");
 
@@ -83,6 +120,8 @@ export default function ReviewHub() {
 
     setIsGenerating(true);
     setCopied(false);
+    setHasOpenedGoogle(false);
+    setClipboardFailed(false);
 
     try {
       const res = await fetch("/api/generate-review", {
@@ -110,14 +149,56 @@ export default function ReviewHub() {
     }
   };
 
-  const handleCopy = async () => {
+  const fallbackCopyText = (text: string): boolean => {
+    try {
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      textArea.style.position = "fixed";
+      textArea.style.left = "-9999px";
+      textArea.style.top = "0";
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      const successful = document.execCommand("copy");
+      document.body.removeChild(textArea);
+      return successful;
+    } catch {
+      return false;
+    }
+  };
+
+  // Best one-tap workflow: Copies review text & opens official Google review page immediately
+  const handleCopyAndOpenGoogle = async () => {
     if (!generatedReview) return;
+    let copiedOk = false;
+
     try {
       await navigator.clipboard.writeText(generatedReview);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 3500);
-    } catch (err) {
-      console.error("Clipboard copy error:", err);
+      copiedOk = true;
+    } catch {
+      copiedOk = fallbackCopyText(generatedReview);
+    }
+
+    setCopied(copiedOk);
+    setClipboardFailed(!copiedOk);
+    setHasOpenedGoogle(true);
+
+    // Open official Google review composer in a new tab immediately
+    window.open(BUSINESS_CONFIG.googleReviewWriteUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const handleManualCopy = async () => {
+    if (!generatedReview) return;
+    let copiedOk = false;
+    try {
+      await navigator.clipboard.writeText(generatedReview);
+      copiedOk = true;
+    } catch {
+      copiedOk = fallbackCopyText(generatedReview);
+    }
+    setCopied(copiedOk);
+    if (copiedOk) {
+      setClipboardFailed(false);
     }
   };
 
@@ -181,36 +262,30 @@ export default function ReviewHub() {
         : language === "hinglish"
         ? "Your Review (Editable)"
         : "Your Review (Editable)",
-    btnPostOnGoogle:
+    btnCopyAndOpenGoogle:
       language === "hi"
-        ? "Google पर पोस्ट करें"
+        ? "COPY & OPEN GOOGLE REVIEW"
         : language === "hinglish"
-        ? "Post on Google"
-        : "Post on Google",
-    btnCopyReview:
+        ? "COPY & OPEN GOOGLE REVIEW"
+        : "COPY & OPEN GOOGLE REVIEW",
+    successMessage:
       language === "hi"
-        ? "रिव्यू कॉपी करें"
+        ? "आपका रिव्यू कॉपी हो गया है! Google पर पेस्ट करें, स्टार रेटिंग चुनें और Post दबाएं।"
         : language === "hinglish"
-        ? "Copy Review"
-        : "Copy Review",
-    btnCopied:
-      language === "hi"
-        ? "कॉपी हो गया! अब Google पर पेस्ट करें"
-        : language === "hinglish"
-        ? "Copied! Paste on Google"
-        : "Copied! Paste on Google",
+        ? "Your review is copied! Paste it into Google, select your star rating and tap Post."
+        : "Your review is copied! Paste it into Google, select your star rating and tap Post.",
+    step1Guide:
+      language === "hi" ? "1. रिव्यू कॉपी हुआ" : "1. Review Copied",
+    step2Guide:
+      language === "hi" ? "2. Google बॉक्स में पेस्ट करें" : "2. Paste in Google Box",
+    step3Guide:
+      language === "hi" ? "3. स्टार चुनें और सबमिट करें" : "3. Select Stars & Post",
     regenerate:
       language === "hi"
         ? "पुनः बनाएं (Regenerate)"
         : language === "hinglish"
         ? "Regenerate"
         : "Regenerate",
-    googleNotice:
-      language === "hi"
-        ? "रिव्यू कॉपी हो गया है। 'Google पर पोस्ट करें' दबाएं और सीधे पेस्ट करके सबमिट करें।"
-        : language === "hinglish"
-        ? "Review copied! Tap 'Post on Google' and paste to submit your review."
-        : "Review copied to clipboard. Tap 'Post on Google' to paste and publish directly on Google Maps.",
   };
 
   return (
@@ -399,11 +474,11 @@ export default function ReviewHub() {
         </div>
 
         {/* ========================================================
-            3. REVIEW RESULT CARD (SMOOTH REVEAL)
+            3. REVIEW RESULT CARD (SMOOTH REVEAL + ONE-TAP WORKFLOW)
            ======================================================== */}
         {generatedReview && (
-          <section className="bg-[#151A17] border-2 border-[#65F000] rounded-2xl p-4 sm:p-5 shadow-[0_0_25px_rgba(101,240,0,0.2)] animate-in fade-in slide-in-from-bottom-3 duration-200">
-            <div className="flex items-center justify-between mb-2.5">
+          <section className="bg-[#151A17] border-2 border-[#65F000] rounded-2xl p-4 sm:p-5 shadow-[0_0_25px_rgba(101,240,0,0.2)] animate-in fade-in slide-in-from-bottom-3 duration-200 flex flex-col gap-3">
+            <div className="flex items-center justify-between">
               <span className="text-xs font-black uppercase text-[#65F000] tracking-wider">
                 {t.reviewResultLabel}
               </span>
@@ -422,47 +497,79 @@ export default function ReviewHub() {
               className="w-full bg-[#080B09] border border-[#303630] rounded-xl p-3 text-xs sm:text-sm text-white leading-relaxed focus:outline-none focus:border-[#65F000] transition-colors resize-none"
             />
 
-            {/* ACTION BUTTONS: POST ON GOOGLE IS PRIMARY */}
-            <div className="flex flex-col sm:flex-row gap-2.5 mt-3">
-              {/* PRIMARY ACTION: POST ON GOOGLE */}
-              <a
-                href={BUSINESS_CONFIG.googleReviewWriteUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={handleCopy}
-                className="flex-1 min-h-[46px] py-3 px-4 rounded-xl font-black text-xs sm:text-sm text-black bg-[#65F000] hover:bg-[#70FF00] flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-[0.98] cursor-pointer"
-              >
-                <span>{t.btnPostOnGoogle}</span>
-                <ExternalLink className="w-4 h-4 stroke-[2.5]" />
-              </a>
+            {/* ONE PRIMARY BUTTON: COPY & OPEN GOOGLE REVIEW */}
+            <button
+              type="button"
+              onClick={handleCopyAndOpenGoogle}
+              className="w-full min-h-[50px] py-3.5 px-4 rounded-xl font-black text-xs sm:text-sm text-black bg-[#65F000] hover:bg-[#70FF00] active:scale-[0.99] transition-all flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(101,240,0,0.35)] cursor-pointer"
+            >
+              <Copy className="w-4 h-4 stroke-[2.5]" />
+              <span className="tracking-wide uppercase">{t.btnCopyAndOpenGoogle}</span>
+              <ExternalLink className="w-4 h-4 stroke-[2.5]" />
+            </button>
 
-              {/* SECONDARY ACTION: COPY REVIEW */}
-              <button
-                type="button"
-                onClick={handleCopy}
-                className={`min-h-[46px] px-4 py-3 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer border ${
-                  copied
-                    ? "bg-[#65F000]/20 text-[#65F000] border-[#65F000]"
-                    : "bg-[#080B09] hover:bg-[#1E2521] text-white border-[#303630]"
-                }`}
-              >
-                {copied ? (
-                  <>
-                    <CheckCircle2 className="w-4 h-4 text-[#65F000]" />
-                    <span>{t.btnCopied}</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-4 h-4 text-[#65F000]" />
-                    <span>{t.btnCopyReview}</span>
-                  </>
-                )}
-              </button>
-            </div>
+            {/* SUCCESS BANNER & 3-STEP VISUAL INSTRUCTIONS */}
+            {hasOpenedGoogle && (
+              <div className="bg-[#0D110F] border border-[#65F000]/40 rounded-xl p-3 sm:p-3.5 flex flex-col gap-2.5 animate-in fade-in duration-200">
+                <div className="flex items-start gap-2 text-left">
+                  <CheckCircle2 className="w-4 h-4 text-[#65F000] shrink-0 mt-0.5" />
+                  <p className="text-xs font-bold text-white leading-snug">
+                    {t.successMessage}
+                  </p>
+                </div>
 
-            <p className="text-[11px] text-neutral-400 text-center mt-2.5 leading-snug">
-              {t.googleNotice}
-            </p>
+                {/* 3 Step Visual Guide */}
+                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-[#303630]/60">
+                  <div className="flex flex-col items-center text-center p-2 rounded-lg bg-[#151A17] border border-[#303630]">
+                    <div className="w-6 h-6 rounded-full bg-[#65F000]/20 text-[#65F000] flex items-center justify-center mb-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                    </div>
+                    <span className="text-[10px] font-extrabold text-white leading-tight">
+                      {t.step1Guide}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col items-center text-center p-2 rounded-lg bg-[#151A17] border border-[#303630]">
+                    <div className="w-6 h-6 rounded-full bg-[#65F000]/20 text-[#65F000] flex items-center justify-center mb-1">
+                      <ClipboardPaste className="w-3.5 h-3.5" />
+                    </div>
+                    <span className="text-[10px] font-extrabold text-white leading-tight">
+                      {t.step2Guide}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col items-center text-center p-2 rounded-lg bg-[#151A17] border border-[#303630]">
+                    <div className="w-6 h-6 rounded-full bg-[#65F000]/20 text-[#65F000] flex items-center justify-center mb-1">
+                      <Send className="w-3.5 h-3.5" />
+                    </div>
+                    <span className="text-[10px] font-extrabold text-white leading-tight">
+                      {t.step3Guide}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* FALLBACK IF CLIPBOARD ACCESS IS DENIED OR FAILED */}
+            {clipboardFailed && (
+              <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-amber-950/60 border border-amber-800 text-left">
+                <span className="text-xs font-bold text-amber-300">
+                  Clipboard access was restricted by your browser.
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleManualCopy}
+                    className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs"
+                  >
+                    {copied ? "Copied!" : "Manual Copy Text"}
+                  </button>
+                  <span className="text-[11px] text-neutral-300">
+                    or tap & hold inside the box above to copy.
+                  </span>
+                </div>
+              </div>
+            )}
           </section>
         )}
 
