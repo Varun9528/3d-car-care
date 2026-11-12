@@ -13,14 +13,25 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const service = typeof body.service === "string" && body.service.trim() ? body.service.trim() : "Detailing";
+    const services = Array.isArray(body.services)
+      ? body.services.filter((s: unknown) => typeof s === "string" && s.trim().length > 0)
+      : typeof body.service === "string" && body.service.trim()
+      ? [body.service.trim()]
+      : ["Detailing"];
+
+    const experiences = Array.isArray(body.experiences)
+      ? body.experiences.filter((e: unknown) => typeof e === "string" && e.trim().length > 0)
+      : [];
+
     const feedback = typeof body.feedback === "string" ? body.feedback.trim() : "";
     const language = ["en", "hi", "hinglish"].includes(body.language)
       ? (body.language as "en" | "hi" | "hinglish")
       : "en";
 
     const input: SimplifiedReviewInput = {
-      service,
+      services,
+      service: services[0] || "Detailing",
+      experiences,
       rating,
       feedback,
       language,

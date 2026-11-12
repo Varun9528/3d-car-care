@@ -16,27 +16,47 @@ import {
   AlertCircle,
   RotateCcw,
   Check,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
-import { COMPACT_SERVICES, BUSINESS_CONFIG, CompactService } from "@/lib/services-data";
+import {
+  ALL_SERVICES,
+  ALL_EXPERIENCES,
+  BUSINESS_CONFIG,
+  ServiceItem,
+  ExperienceItem,
+} from "@/lib/services-data";
 import { ReviewSuggestion } from "@/lib/openai";
 import NfcCardPrintable from "./NfcCardPrintable";
 
 type Language = "en" | "hi" | "hinglish";
 
-const SESSION_STORAGE_KEY = "3d_car_care_session_review_v2";
+const SESSION_STORAGE_KEY = "3d_car_care_session_review_v3";
 
 export default function ReviewHub() {
   const [language, setLanguage] = useState<Language>("en");
-  const [selectedService, setSelectedService] = useState<string>("PPF");
-  const [rating, setRating] = useState<number>(0); // Starts unselected (0)
+
+  // Multi-select Services & Experiences
+  const [selectedServices, setSelectedServices] = useState<string[]>([]);
+  const [selectedExperiences, setSelectedExperiences] = useState<string[]>([]);
+
+  // Star Rating (starts at 0 unselected) & Hover
+  const [rating, setRating] = useState<number>(0);
   const [hoverRating, setHoverRating] = useState<number>(0);
+
+  // Optional Custom Feedback
   const [experienceText, setExperienceText] = useState<string>("");
 
-  // 6 Review Suggestions & Selected Review
+  // 6 Review Suggestions & Selected Option
   const [suggestions, setSuggestions] = useState<ReviewSuggestion[]>([]);
   const [selectedSuggestionId, setSelectedSuggestionId] = useState<number | null>(null);
   const [generatedReview, setGeneratedReview] = useState<string>("");
 
+  // Carousel Active Index (0 to 5)
+  const [carouselIndex, setCarouselIndex] = useState<number>(0);
+  const carouselRef = useRef<HTMLDivElement>(null);
+
+  // Action & State Flags
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
   const [hasOpenedGoogle, setHasOpenedGoogle] = useState<boolean>(false);
@@ -78,7 +98,8 @@ export default function ReviewHub() {
           if (parsed.selectedSuggestionId) setSelectedSuggestionId(parsed.selectedSuggestionId);
           if (parsed.review) setGeneratedReview(parsed.review);
           if (parsed.rating) setRating(parsed.rating);
-          if (parsed.service) setSelectedService(parsed.service);
+          if (Array.isArray(parsed.selectedServices)) setSelectedServices(parsed.selectedServices);
+          if (Array.isArray(parsed.selectedExperiences)) setSelectedExperiences(parsed.selectedExperiences);
           if (parsed.experienceText) setExperienceText(parsed.experienceText);
           if (parsed.hasOpenedGoogle) setHasOpenedGoogle(parsed.hasOpenedGoogle);
         }
@@ -86,7 +107,7 @@ export default function ReviewHub() {
         console.warn("Session storage restore error:", e);
       }
 
-      // Generate high-resolution QR with pristine high-contrast optical quiet zones
+      // Generate high-resolution QR with optical quiet zones
       QRCode.toDataURL(fullUrl, {
         width: 600,
         margin: 2,
@@ -105,7 +126,7 @@ export default function ReviewHub() {
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
-        if (suggestions.length > 0 || generatedReview) {
+        if (suggestions.length > 0 || generatedReview || selectedServices.length > 0 || rating > 0) {
           sessionStorage.setItem(
             SESSION_STORAGE_KEY,
             JSON.stringify({
@@ -113,7 +134,8 @@ export default function ReviewHub() {
               selectedSuggestionId,
               review: generatedReview,
               rating,
-              service: selectedService,
+              selectedServices,
+              selectedExperiences,
               experienceText,
               hasOpenedGoogle,
             })
@@ -123,17 +145,29 @@ export default function ReviewHub() {
         console.warn("Session storage save error:", e);
       }
     }
-  }, [suggestions, selectedSuggestionId, generatedReview, rating, selectedService, experienceText, hasOpenedGoogle]);
+  }, [
+    suggestions,
+    selectedSuggestionId,
+    generatedReview,
+    rating,
+    selectedServices,
+    selectedExperiences,
+    experienceText,
+    hasOpenedGoogle,
+  ]);
 
   const handleClearDraft = () => {
     setSuggestions([]);
     setSelectedSuggestionId(null);
     setGeneratedReview("");
     setExperienceText("");
+    setSelectedServices([]);
+    setSelectedExperiences([]);
     setRating(0);
     setHasOpenedGoogle(false);
     setCopied(false);
     setClipboardFailed(false);
+    setCarouselIndex(0);
     try {
       if (typeof window !== "undefined") {
         sessionStorage.removeItem(SESSION_STORAGE_KEY);
@@ -141,6 +175,18 @@ export default function ReviewHub() {
     } catch {
       // Ignore
     }
+  };
+
+  const handleToggleService = (name: string) => {
+    setSelectedServices((prev) =>
+      prev.includes(name) ? prev.filter((s) => s !== name) : [...prev, name]
+    );
+  };
+
+  const handleToggleExperience = (name: string) => {
+    setSelectedExperiences((prev) =>
+      prev.includes(name) ? prev.filter((e) => e !== name) : [...prev, name]
+    );
   };
 
   const handleGenerateReview = async () => {
@@ -152,7 +198,7 @@ export default function ReviewHub() {
           ? "कृपया आगे बढ़ने के लिए 1 से 5 स्टार रेटिंग चुनें।"
           : language === "hinglish"
           ? "Please pehle 1 se 5 star rating select karein."
-          : "Please tap a star rating (1 to 5) to generate your reviews."
+          : "Please select a star rating (1 to 5) to generate your reviews."
       );
       return;
     }
@@ -167,7 +213,9 @@ export default function ReviewHub() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          service: selectedService,
+          services: selectedServices.length > 0 ? selectedServices : ["Detailing"],
+          service: selectedServices[0] || "Detailing",
+          experiences: selectedExperiences,
           rating,
           feedback: experienceText,
           language,
@@ -177,9 +225,12 @@ export default function ReviewHub() {
       const data = await res.json();
       if (data.success && Array.isArray(data.suggestions) && data.suggestions.length > 0) {
         setSuggestions(data.suggestions);
-        // Default to the first option or keep current
         setSelectedSuggestionId(1);
         setGeneratedReview(data.suggestions[0].text);
+        setCarouselIndex(0);
+        if (carouselRef.current) {
+          carouselRef.current.scrollTo({ left: 0, behavior: "smooth" });
+        }
       } else {
         setErrorMessage(data.error || "Failed to generate reviews. Please try again.");
       }
@@ -191,11 +242,50 @@ export default function ReviewHub() {
     }
   };
 
-  const handleSelectSuggestion = (sug: ReviewSuggestion) => {
+  const handleSelectSuggestion = (sug: ReviewSuggestion, index?: number) => {
     setSelectedSuggestionId(sug.id);
     setGeneratedReview(sug.text);
     setCopied(false);
     setHasOpenedGoogle(false);
+    if (typeof index === "number") {
+      scrollToCard(index);
+    }
+  };
+
+  const scrollToCard = (index: number) => {
+    if (!carouselRef.current) return;
+    const container = carouselRef.current;
+    const cards = container.children;
+    if (cards[index]) {
+      const targetCard = cards[index] as HTMLElement;
+      container.scrollTo({
+        left: targetCard.offsetLeft - container.offsetLeft - 8,
+        behavior: "smooth",
+      });
+      setCarouselIndex(index);
+    }
+  };
+
+  const scrollCarousel = (direction: "left" | "right") => {
+    if (!carouselRef.current) return;
+    const container = carouselRef.current;
+    const cardWidth = container.clientWidth * 0.84;
+    const delta = direction === "left" ? -cardWidth : cardWidth;
+    container.scrollBy({ left: delta, behavior: "smooth" });
+  };
+
+  const handleCarouselScroll = () => {
+    if (!carouselRef.current || suggestions.length === 0) return;
+    const container = carouselRef.current;
+    const scrollLeft = container.scrollLeft;
+    const cardWidth = container.clientWidth * 0.84;
+    const newIndex = Math.min(
+      suggestions.length - 1,
+      Math.max(0, Math.round(scrollLeft / cardWidth))
+    );
+    if (newIndex !== carouselIndex) {
+      setCarouselIndex(newIndex);
+    }
   };
 
   const fallbackCopyText = (text: string): boolean => {
@@ -283,27 +373,31 @@ export default function ReviewHub() {
         : language === "hinglish"
         ? "Thank you for trusting us with your car! Share your experience."
         : "Thank you for trusting us with your car! Share your experience.",
-    serviceLabel:
-      language === "hi" ? "सेवा चुनें" : language === "hinglish" ? "Select Service" : "Select Service",
+    servicesLabel:
+      language === "hi" ? "प्राप्त सेवाएं चुनें (मल्टी-सेलेक्ट)" : "Select Services Received",
+    servicesSubtitle:
+      language === "hi" ? "जितनी चाहें उतनी चुनें" : "Select all that apply",
+    experiencesLabel:
+      language === "hi" ? "हमारी सर्विस में आपको क्या पसंद आया?" : "What did you like about our service?",
+    experiencesSubtitle:
+      language === "hi" ? "कोई भी विकल्प चुनें (वैकल्पिक)" : "Select any that apply (optional)",
     ratingLabel:
-      language === "hi" ? "अपना अनुभव रेट करें" : language === "hinglish" ? "Rate Experience" : "Rate Experience",
+      language === "hi" ? "अपना अनुभव रेट करें" : "Rate Your Experience",
+    feedbackLabel:
+      language === "hi" ? "अतिरिक्त विवरण या कार मॉडल (वैकल्पिक)" : "Add your own notes or car model (optional)",
     feedbackPlaceholder:
       language === "hi"
-        ? "हमें बताएं कि आपको हमारी सेवा में क्या पसंद आया..."
+        ? "उदा. मेरी Harrier का काम बहुत शानदार हुआ, टीम समय पर थी..."
         : language === "hinglish"
-        ? "Tell us what you liked about our service..."
-        : "Tell us what you liked about our service...",
+        ? "e.g. Got my Harrier detailed, finish was unbelievable..."
+        : "e.g. Brought my Harrier in, outstanding work and edge finish...",
     btnGenerate:
       language === "hi"
         ? "✦ 6 रिव्यू विकल्प बनाएं"
-        : language === "hinglish"
-        ? "✦ Generate 6 Review Options"
         : "✦ Generate 6 Review Options",
     btnGenerating:
       language === "hi"
         ? "6 विकल्प तैयार हो रहे हैं..."
-        : language === "hinglish"
-        ? "Generating 6 Options..."
         : "Generating 6 Options...",
     ratingLabels: {
       1: language === "hi" ? "निराशाजनक (1/5)" : "Disappointing (1/5)",
@@ -312,14 +406,12 @@ export default function ReviewHub() {
       4: language === "hi" ? "बहुत अच्छा (4/5)" : "Very Good (4/5)",
       5: language === "hi" ? "शानदार (5/5)" : "Outstanding (5/5)",
     },
-    suggestionsHeader:
-      language === "hi" ? "अपना पसंदीदा रिव्यू चुनें (6 विकल्प)" : "Choose Your Preferred Review (6 Options)",
+    carouselHeader:
+      language === "hi" ? "6 रिव्यू विकल्प (स्वाइप करें)" : "Choose Review (Swipe Left/Right)",
     reviewResultLabel:
       language === "hi" ? "चयनित रिव्यू (एडिट कर सकते हैं)" : "Selected Review (Editable)",
     btnCopyAndOpenGoogle:
-      language === "hi"
-        ? "COPY SELECTED REVIEW & OPEN GOOGLE"
-        : "COPY SELECTED REVIEW & OPEN GOOGLE",
+      "COPY SELECTED REVIEW & OPEN GOOGLE",
     successMessage:
       language === "hi"
         ? "आपका रिव्यू कॉपी हो गया है! Google पर पेस्ट करें, स्टार रेटिंग चुनें और Post दबाएं।"
@@ -332,6 +424,10 @@ export default function ReviewHub() {
       language === "hi" ? "3. स्टार चुनें & सबमिट करें" : "3. Select Stars & Post",
     regenerateAll:
       language === "hi" ? "6 नए विकल्प बनाएं" : "Regenerate All 6",
+    selectThisReview:
+      language === "hi" ? "यह रिव्यू चुनें" : "Select This Review",
+    selectedBadge:
+      language === "hi" ? "चयनित" : "Selected",
   };
 
   return (
@@ -339,7 +435,7 @@ export default function ReviewHub() {
       {/* ========================================================
           THE SINGLE MAIN CARD (All elements inside one container)
          ======================================================== */}
-      <div className="w-full max-w-[480px] bg-[#121614] border border-[#65F000]/30 rounded-3xl p-5 sm:p-7 shadow-[0_12px_45px_rgba(0,0,0,0.85),0_0_35px_rgba(101,240,0,0.12)] flex flex-col gap-5 relative overflow-hidden backdrop-blur-md">
+      <div className="w-full max-w-[480px] bg-[#121614] border border-[#65F000]/30 rounded-3xl p-4 sm:p-6 shadow-[0_12px_45px_rgba(0,0,0,0.85),0_0_35px_rgba(101,240,0,0.12)] flex flex-col gap-4 sm:gap-5 relative overflow-hidden backdrop-blur-md">
         
         {/* Subtle Ambient Green Glow */}
         <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-64 h-32 bg-[#65F000]/15 blur-3xl pointer-events-none rounded-full" />
@@ -377,7 +473,7 @@ export default function ReviewHub() {
                 key={lang}
                 type="button"
                 onClick={() => setLanguage(lang)}
-                className={`min-h-[34px] px-3 py-1 rounded-full text-xs font-bold transition-all duration-150 cursor-pointer ${
+                className={`min-h-[32px] px-3 py-1 rounded-full text-xs font-bold transition-all duration-150 cursor-pointer ${
                   language === lang
                     ? "bg-[#65F000] text-black shadow-sm"
                     : "text-neutral-400 hover:text-white hover:bg-[#1E2521]"
@@ -392,40 +488,94 @@ export default function ReviewHub() {
         {/* Subtle Separator */}
         <div className="h-px w-full bg-[#303630]/60" />
 
-        {/* 2. CUSTOMER INPUT A: SELECT SERVICE (5 COMPACT OPTIONS) */}
+        {/* ========================================================
+            A. MULTIPLE SERVICE SELECTION (MULTI-SELECT)
+           ======================================================== */}
         <div className="flex flex-col gap-2">
-          <label className="text-xs font-extrabold uppercase tracking-wider text-neutral-300 flex items-center justify-between">
-            <span>{t.serviceLabel}</span>
-            <span className="text-[10px] text-neutral-500 font-normal">Choose one</span>
-          </label>
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-extrabold uppercase tracking-wider text-neutral-300">
+              {t.servicesLabel}
+            </label>
+            <span className="text-[10px] text-neutral-500 font-medium">
+              {t.servicesSubtitle}
+            </span>
+          </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            {COMPACT_SERVICES.map((s: CompactService, idx: number) => {
-              const isSelected = selectedService === s.name;
-              const isLastAndOdd = idx === COMPACT_SERVICES.length - 1 && COMPACT_SERVICES.length % 2 !== 0;
-
+          <div className="flex flex-wrap gap-1.5 sm:gap-2">
+            {ALL_SERVICES.map((s: ServiceItem) => {
+              const isSelected = selectedServices.includes(s.name);
               return (
                 <button
                   key={s.id}
                   type="button"
-                  onClick={() => setSelectedService(s.name)}
-                  className={`min-h-[44px] px-3 py-2 rounded-xl text-xs sm:text-sm font-extrabold transition-all duration-150 flex items-center justify-center text-center cursor-pointer border ${
-                    isLastAndOdd ? "col-span-2 sm:col-span-1" : ""
-                  } ${
+                  onClick={() => handleToggleService(s.name)}
+                  className={`min-h-[34px] px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all duration-150 flex items-center gap-1.5 cursor-pointer border ${
                     isSelected
-                      ? "bg-[#080B09] border-[#65F000] text-[#65F000] shadow-[0_0_12px_rgba(101,240,0,0.25)]"
+                      ? "bg-[#65F000]/15 border-[#65F000] text-[#65F000] shadow-[0_0_10px_rgba(101,240,0,0.25)] ring-1 ring-[#65F000]/60"
                       : "bg-[#080B09]/80 border-[#303630] text-neutral-300 hover:border-neutral-500 hover:text-white"
                   }`}
                 >
-                  {language === "hi" ? s.nameHindi : s.name}
+                  <span
+                    className={`w-3.5 h-3.5 rounded-sm flex items-center justify-center text-[10px] border ${
+                      isSelected
+                        ? "bg-[#65F000] text-black border-[#65F000]"
+                        : "border-[#303630] text-transparent"
+                    }`}
+                  >
+                    ✓
+                  </span>
+                  <span>{language === "hi" ? s.nameHindi : s.name}</span>
                 </button>
               );
             })}
           </div>
         </div>
 
-        {/* 3. CUSTOMER INPUT B: RATE EXPERIENCE (5 INTERACTIVE STARS) */}
-        <div className="flex flex-col items-center text-center gap-1.5 py-1">
+        {/* ========================================================
+            B. MULTIPLE EXPERIENCE SELECTION ("What did you like?")
+           ======================================================== */}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-extrabold uppercase tracking-wider text-neutral-300">
+              {t.experiencesLabel}
+            </label>
+            <span className="text-[10px] text-neutral-500 font-medium">
+              {t.experiencesSubtitle}
+            </span>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5 sm:gap-2 max-h-[160px] overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:#303630_transparent]">
+            {ALL_EXPERIENCES.map((e: ExperienceItem) => {
+              const isSelected = selectedExperiences.includes(e.name);
+              return (
+                <button
+                  key={e.id}
+                  type="button"
+                  onClick={() => handleToggleExperience(e.name)}
+                  className={`min-h-[32px] px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all duration-150 flex items-center gap-1.5 cursor-pointer border ${
+                    isSelected
+                      ? "bg-[#65F000]/15 border-[#65F000] text-[#65F000] shadow-[0_0_8px_rgba(101,240,0,0.2)] ring-1 ring-[#65F000]/60"
+                      : "bg-[#080B09]/60 border-[#303630] text-neutral-400 hover:text-white hover:border-neutral-500"
+                  }`}
+                >
+                  <span
+                    className={`w-3 h-3 rounded-sm flex items-center justify-center text-[9px] border ${
+                      isSelected
+                        ? "bg-[#65F000] text-black border-[#65F000]"
+                        : "border-[#303630] text-transparent"
+                    }`}
+                  >
+                    ✓
+                  </span>
+                  <span>{language === "hi" ? e.nameHindi : e.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 3. CUSTOMER INPUT: RATE EXPERIENCE (5 INTERACTIVE STARS) */}
+        <div className="flex flex-col items-center text-center gap-1 py-1">
           <label className="text-xs font-extrabold uppercase tracking-wider text-neutral-300">
             {t.ratingLabel}
           </label>
@@ -465,8 +615,11 @@ export default function ReviewHub() {
           </div>
         </div>
 
-        {/* 4. CUSTOMER INPUT C: OPTIONAL FEEDBACK */}
+        {/* 4. OPTIONAL CUSTOM FEEDBACK OR NOTES */}
         <div className="flex flex-col gap-1.5">
+          <label htmlFor={experienceInputId} className="text-[11px] font-bold text-neutral-400">
+            {t.feedbackLabel}
+          </label>
           <textarea
             id={experienceInputId}
             rows={2}
@@ -507,74 +660,138 @@ export default function ReviewHub() {
         </div>
 
         {/* ========================================================
-            6. MULTIPLE REVIEW SUGGESTIONS LIST (6 DISTINCT OPTIONS)
+            D. HORIZONTAL REVIEW CAROUSEL (6 DISTINCT SUGGESTIONS)
            ======================================================== */}
         {suggestions.length > 0 && (
           <div className="flex flex-col gap-3 pt-3 border-t border-[#303630]/60 animate-in fade-in slide-in-from-bottom-2 duration-200">
+            
+            {/* Header: Title, Position (1/6), and Desktop/Tap Arrows */}
             <div className="flex items-center justify-between">
-              <span className="text-xs font-black uppercase text-[#65F000] tracking-wider">
-                {t.suggestionsHeader}
-              </span>
-              <button
-                type="button"
-                onClick={handleGenerateReview}
-                disabled={isGenerating}
-                className="text-[11px] font-bold text-neutral-400 hover:text-[#65F000] flex items-center gap-1 transition-colors cursor-pointer"
-              >
-                <RefreshCw className={`w-3 h-3 ${isGenerating ? "animate-spin" : ""}`} />
-                <span>{t.regenerateAll}</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black uppercase text-[#65F000] tracking-wider">
+                  {t.carouselHeader}
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-[#080B09] border border-[#303630] text-[10px] font-mono font-bold text-[#65F000]">
+                  {carouselIndex + 1} / {suggestions.length}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => scrollCarousel("left")}
+                  aria-label="Previous review"
+                  className="w-7 h-7 rounded-lg bg-[#080B09] border border-[#303630] hover:border-[#65F000] text-neutral-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollCarousel("right")}
+                  aria-label="Next review"
+                  className="w-7 h-7 rounded-lg bg-[#080B09] border border-[#303630] hover:border-[#65F000] text-neutral-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
-            {/* 6 Selectable Review Cards */}
-            <div className="flex flex-col gap-2.5 max-h-[380px] overflow-y-auto pr-1">
-              {suggestions.map((sug) => {
-                const isSelected = selectedSuggestionId === sug.id;
-                return (
-                  <button
-                    key={sug.id}
-                    type="button"
-                    onClick={() => handleSelectSuggestion(sug)}
-                    className={`text-left p-3 rounded-xl border transition-all duration-150 flex flex-col gap-1.5 cursor-pointer relative ${
-                      isSelected
-                        ? "bg-[#080B09] border-[#65F000] shadow-[0_0_15px_rgba(101,240,0,0.2)]"
-                        : "bg-[#080B09]/70 border-[#303630] hover:border-neutral-500 hover:bg-[#080B09]"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between w-full">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`w-4 h-4 rounded-full text-[10px] font-black flex items-center justify-center ${
-                            isSelected ? "bg-[#65F000] text-black" : "bg-[#1E2521] text-neutral-400"
-                          }`}
-                        >
-                          {sug.id}
-                        </span>
-                        <span
-                          className={`text-[11px] font-extrabold uppercase tracking-wide ${
-                            isSelected ? "text-[#65F000]" : "text-neutral-400"
-                          }`}
-                        >
-                          {sug.styleLabel}
-                        </span>
+            {/* HORIZONTAL SWIPEABLE CAROUSEL CONTAINER */}
+            <div className="relative w-full overflow-hidden">
+              <div
+                ref={carouselRef}
+                onScroll={handleCarouselScroll}
+                className="flex gap-3 overflow-x-auto snap-x snap-mandatory scroll-smooth pb-2 pt-1 -mx-1 px-1 touch-pan-x [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+              >
+                {suggestions.map((sug, idx) => {
+                  const isSelected = selectedSuggestionId === sug.id;
+                  return (
+                    <div
+                      key={sug.id}
+                      onClick={() => handleSelectSuggestion(sug, idx)}
+                      className={`shrink-0 w-[84%] sm:w-[86%] snap-center rounded-2xl p-4 flex flex-col justify-between transition-all duration-200 cursor-pointer text-left border ${
+                        isSelected
+                          ? "bg-[#080B09] border-[#65F000] shadow-[0_0_20px_rgba(101,240,0,0.22)] ring-1 ring-[#65F000]"
+                          : "bg-[#080B09]/80 border-[#303630] hover:border-neutral-500"
+                      }`}
+                    >
+                      {/* Card Header: Style Name & Selection Pill */}
+                      <div className="flex items-center justify-between w-full mb-2">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`w-4 h-4 rounded-full text-[10px] font-black flex items-center justify-center ${
+                              isSelected ? "bg-[#65F000] text-black" : "bg-[#1E2521] text-neutral-400"
+                            }`}
+                          >
+                            {sug.id}
+                          </span>
+                          <span
+                            className={`text-[11px] font-black uppercase tracking-wider ${
+                              isSelected ? "text-[#65F000]" : "text-neutral-400"
+                            }`}
+                          >
+                            {sug.styleLabel}
+                          </span>
+                        </div>
+
+                        {isSelected ? (
+                          <span className="flex items-center gap-1 text-[10px] font-black text-[#65F000] bg-[#65F000]/15 px-2 py-0.5 rounded-full border border-[#65F000]/40">
+                            <Check className="w-3 h-3 stroke-[3]" />
+                            <span>{t.selectedBadge}</span>
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-neutral-500">
+                            Tap to choose
+                          </span>
+                        )}
                       </div>
 
-                      {isSelected ? (
-                        <span className="flex items-center gap-1 text-[10px] font-bold text-[#65F000]">
-                          <Check className="w-3.5 h-3.5 stroke-[3]" />
-                          <span>Selected</span>
-                        </span>
-                      ) : (
-                        <span className="text-[10px] text-neutral-500">Tap to select</span>
-                      )}
-                    </div>
+                      {/* Review Preview Body */}
+                      <p className="text-xs sm:text-[13px] text-neutral-200 leading-relaxed italic line-clamp-4 my-1">
+                        &quot;{sug.text}&quot;
+                      </p>
 
-                    <p className="text-xs text-neutral-200 leading-relaxed line-clamp-3">
-                      &quot;{sug.text}&quot;
-                    </p>
-                  </button>
-                );
-              })}
+                      {/* Card Action Button */}
+                      <div className="mt-2.5 pt-2 border-t border-[#303630]/60 flex items-center justify-between">
+                        <span className="text-[10px] text-neutral-400 font-mono">
+                          Option {idx + 1} of 6
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSelectSuggestion(sug, idx);
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider transition-colors cursor-pointer ${
+                            isSelected
+                              ? "bg-[#65F000] text-black"
+                              : "bg-[#1E2521] text-neutral-300 hover:text-white hover:bg-[#252f2a]"
+                          }`}
+                        >
+                          {isSelected ? t.selectedBadge : t.selectThisReview}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Dot Indicators */}
+              <div className="flex justify-center items-center gap-1.5 mt-2">
+                {suggestions.map((s, idx) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => scrollToCard(idx)}
+                    className={`h-1.5 rounded-full transition-all duration-200 cursor-pointer ${
+                      carouselIndex === idx
+                        ? "w-5 bg-[#65F000]"
+                        : "w-1.5 bg-[#303630] hover:bg-neutral-500"
+                    }`}
+                    aria-label={`Go to review option ${idx + 1}`}
+                  />
+                ))}
+              </div>
             </div>
 
             {/* Live Editable Textarea for Final Polish */}
@@ -593,8 +810,8 @@ export default function ReviewHub() {
                     <button
                       type="button"
                       onClick={handleClearDraft}
-                      title="Clear review"
-                      className="p-1 rounded-md text-neutral-400 hover:text-white hover:bg-[#080B09] transition-colors"
+                      title="Clear review draft"
+                      className="p-1 rounded-md text-neutral-400 hover:text-white hover:bg-[#080B09] transition-colors cursor-pointer"
                     >
                       <RotateCcw className="w-3 h-3" />
                     </button>
@@ -609,6 +826,19 @@ export default function ReviewHub() {
                   onChange={(e) => setGeneratedReview(e.target.value)}
                   className="w-full bg-[#080B09] border border-[#303630] rounded-xl p-3 text-xs sm:text-sm text-white leading-relaxed focus:outline-none focus:border-[#65F000] transition-colors resize-none"
                 />
+
+                {/* Regenerate All 6 Quick Action */}
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleGenerateReview}
+                    disabled={isGenerating}
+                    className="text-[11px] font-bold text-neutral-400 hover:text-[#65F000] flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isGenerating ? "animate-spin" : ""}`} />
+                    <span>{t.regenerateAll}</span>
+                  </button>
+                </div>
 
                 {/* ONE PRIMARY BUTTON: COPY SELECTED REVIEW & OPEN GOOGLE */}
                 <a

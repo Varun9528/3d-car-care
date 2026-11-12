@@ -246,3 +246,67 @@ export async function getRepliedReviews(): Promise<RepliedReviewRecord[]> {
   return Array.from(memoryRepliedReviews.values());
 }
 
+// ----------------------------------------------------
+// Recent Review Hashes (Best-effort repetition avoidance)
+// ----------------------------------------------------
+const RECENT_HASHES_FILE = path.join(DATA_DIR, "recent_review_hashes.json");
+const memoryReviewHashes = new Set<string>();
+
+export async function isRecentReviewHash(hash: string): Promise<boolean> {
+  if (memoryReviewHashes.has(hash)) return true;
+
+  const cfg = getUpstashConfig();
+  if (cfg) {
+    const exists = await upstashCommand<number>("sismember", "recent_review_hashes", hash);
+    if (exists === 1) return true;
+  }
+
+  try {
+    if (fs.existsSync(RECENT_HASHES_FILE)) {
+      const list: string[] = JSON.parse(fs.readFileSync(RECENT_HASHES_FILE, "utf-8"));
+      if (list.includes(hash)) return true;
+    }
+  } catch {
+    // Ignore
+  }
+  return false;
+}
+
+export async function recordRecentReviewHashes(hashes: string[]): Promise<void> {
+  if (!hashes || hashes.length === 0) return;
+
+  hashes.forEach((h) => memoryReviewHashes.add(h));
+
+  const cfg = getUpstashConfig();
+  if (cfg) {
+    for (const h of hashes) {
+      await upstashCommand("sadd", "recent_review_hashes", h);
+    }
+    // Set 7-day TTL if possible
+    await upstashCommand("expire", "recent_review_hashes", 60 * 60 * 24 * 7);
+  }
+
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    let list: string[] = [];
+    if (fs.existsSync(RECENT_HASHES_FILE)) {
+      try {
+        list = JSON.parse(fs.readFileSync(RECENT_HASHES_FILE, "utf-8"));
+      } catch {
+        list = [];
+      }
+    }
+    for (const h of hashes) {
+      if (!list.includes(h)) list.push(h);
+    }
+    // Keep last 200 hashes max
+    if (list.length > 200) list = list.slice(-200);
+    fs.writeFileSync(RECENT_HASHES_FILE, JSON.stringify(list, null, 2), "utf-8");
+  } catch (err) {
+    console.warn("[Storage] Local review hashes save failed:", err);
+  }
+}
+
+
