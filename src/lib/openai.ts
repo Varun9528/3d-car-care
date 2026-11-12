@@ -9,59 +9,86 @@ function getOpenAIClient(): OpenAI | null {
 }
 
 export interface SimplifiedReviewInput {
-  service: string; // "PPF" | "Ceramic / Graphene" | "Car Wash" | "Detailing" | "Other"
+  service: string; // "PPF" | "Ceramic / Graphene Coating" | "Car Wash" | "Detailing" | "Other"
   rating: number; // 1 to 5
   feedback?: string; // Optional user experience
   language: "en" | "hi" | "hinglish";
 }
 
+export interface ReviewSuggestion {
+  id: number;
+  styleLabel: string;
+  text: string;
+}
+
+const STYLE_LABELS = [
+  "Short & Simple",
+  "Detailed Experience",
+  "Professional",
+  "Friendly & Conversational",
+  "Local Hinglish",
+  "Unique Personal Style",
+];
+
 /**
- * Generate a short, genuine, natural customer review based strictly on user input.
+ * Generate 6 distinct, non-repetitive review suggestions in a single OpenAI request.
  */
-export async function generateCustomerReview(input: SimplifiedReviewInput): Promise<{
-  review: string;
+export async function generateCustomerReviewSuggestions(input: SimplifiedReviewInput): Promise<{
+  suggestions: ReviewSuggestion[];
   source: "openai" | "template";
 }> {
   const openai = getOpenAIClient();
   const trimmedFeedback = (input.feedback || "").trim();
 
-  // If customer provided no or minimal feedback (< 3 characters), provide a clean, editable starter template
-  if (!trimmedFeedback) {
-    return {
-      review: getStarterTemplate(input.service, input.rating, input.language),
-      source: "template",
-    };
-  }
-
   if (!openai) {
     return {
-      review: generateFallbackCustomerReview(input),
+      suggestions: generateFallbackSuggestions(input),
       source: "template",
     };
   }
 
-  let languageInstruction = "Write the review in natural, fluent English.";
+  let languagePrompt = "Write reviews in natural, fluent English.";
   if (input.language === "hi") {
-    languageInstruction = "Write the review in authentic Hindi script (Devanagari). Keep it natural, conversational, and culturally appropriate.";
+    languagePrompt = "Write reviews in natural Hindi script (Devanagari), except Style 5 which can be colloquial Hinglish.";
   } else if (input.language === "hinglish") {
-    languageInstruction = "Write the review in natural, casual Hinglish (Hindi written in Roman English script, e.g. '3D Car Care Centre Indore me PPF karwaya, finishing bohot achhi hai...').";
+    languagePrompt = "Write reviews in natural conversational Hinglish (Hindi words in Roman English script).";
   }
 
   const prompt = `
-You are generating a genuine, short Google review written by an actual car owner for "3D Car Care Centre" in Indore.
+You are generating 6 distinctly different Google review suggestions for a customer of "3D Car Care Centre" in Indore.
 
-Customer provided information:
-- Service received: ${input.service || "Car Care Service"}
-- Star rating: ${input.rating} out of 5 stars
-- Customer's actual notes: "${trimmedFeedback}"
-- Language: ${languageInstruction}
+Customer Input:
+- Service Received: ${input.service || "Car Care Service"}
+- Star Rating: ${input.rating} out of 5 stars
+- Customer's Actual Notes: "${trimmedFeedback || "No additional text provided (generate based on service and rating)"}"
+- Primary Language: ${languagePrompt}
 
-Strict Rules:
-1. Base the review ONLY on what the customer provided above. Do NOT invent specific car models, staff names, extra services, or experiences they did not mention.
-2. Tone must strictly match their rating of ${input.rating} out of 5 stars.
-3. Keep it brief, authentic, and human (around 25 to 55 words). Avoid cliché marketing jargon or robotic AI buzzwords.
-4. Write in first person ("I", "my car").
-5. Return ONLY the review text. Do not wrap in quotes or add headers.
+Generate EXACTLY 6 distinct review options matching these styles:
+1. "Short & Simple" — Concise, punchy, 1-2 sentences.
+2. "Detailed Experience" — Explains the craft, gloss, or thoroughness with more specific adjectives.
+3. "Professional" — Formal, courteous, and polite phrasing.
+4. "Friendly & Conversational" — Warm, relatable customer voice.
+5. "Local Hinglish" — Authentic Indori/Indian conversational casual flavor (e.g., "Kaam sach me top-notch hua hai...").
+6. "Unique Personal Style" — Alternative sentence structure, different vocabulary and opening words.
+
+CRITICAL ANTI-REPETITION RULES:
+- ZERO duplicate phrases. Never repeat the exact same opening words (e.g. do NOT start multiple reviews with "Got my car" or "Visited 3D Car Care").
+- Do NOT repeat cliché closing phrases like "Highly recommended" across multiple reviews.
+- Strictly reflect the customer's actual rating (${input.rating} of 5 stars). If rating is 1-3 stars, keep tone honest, constructive, and balanced without forced hype.
+- Never invent unmentioned staff names, fake discounts, fake warranties, or vehicles.
+- Keep each review between 20 and 65 words.
+
+Return ONLY a valid JSON object matching this schema:
+{
+  "suggestions": [
+    { "id": 1, "styleLabel": "Short & Simple", "text": "..." },
+    { "id": 2, "styleLabel": "Detailed Experience", "text": "..." },
+    { "id": 3, "styleLabel": "Professional", "text": "..." },
+    { "id": 4, "styleLabel": "Friendly & Conversational", "text": "..." },
+    { "id": 5, "styleLabel": "Local Hinglish", "text": "..." },
+    { "id": 6, "styleLabel": "Unique Personal Style", "text": "..." }
+  ]
+}
 `;
 
   try {
@@ -70,99 +97,291 @@ Strict Rules:
       messages: [
         {
           role: "system",
-          content: "You generate authentic, concise, honest customer reviews for Google Maps based strictly on provided notes.",
+          content: "You are an expert review writing assistant that outputs strictly valid JSON containing 6 distinct, diverse customer reviews.",
         },
         { role: "user", content: prompt },
       ],
-      temperature: 0.65,
-      max_tokens: 150,
+      response_format: { type: "json_object" },
+      temperature: 0.8,
+      max_tokens: 650,
     });
 
-    const content = response.choices[0]?.message?.content?.trim();
-    if (content) {
-      return { review: content.replace(/^["']|["']$/g, ""), source: "openai" };
+    const rawContent = response.choices[0]?.message?.content?.trim();
+    if (rawContent) {
+      const parsed = JSON.parse(rawContent);
+      let list: ReviewSuggestion[] = Array.isArray(parsed.suggestions)
+        ? parsed.suggestions
+        : Array.isArray(parsed.reviews)
+        ? parsed.reviews
+        : [];
+
+      // Validate and clean up list
+      if (list.length >= 6) {
+        // Deduplicate
+        const seen = new Set<string>();
+        const uniqueList: ReviewSuggestion[] = [];
+
+        list.slice(0, 6).forEach((item, index) => {
+          const text = (item.text || "").trim().replace(/^["']|["']$/g, "");
+          const norm = text.toLowerCase().slice(0, 30);
+          if (text && !seen.has(norm)) {
+            seen.add(norm);
+            uniqueList.push({
+              id: index + 1,
+              styleLabel: item.styleLabel || STYLE_LABELS[index],
+              text,
+            });
+          }
+        });
+
+        // If all 6 are valid and distinct
+        if (uniqueList.length === 6) {
+          return { suggestions: uniqueList, source: "openai" };
+        }
+      }
     }
   } catch (err) {
-    console.error("[OpenAI] Review generation error:", err);
+    console.error("[OpenAI] Suggestions generation error:", err);
   }
 
+  // Graceful fallback to 6 rule-based styled variations
   return {
-    review: generateFallbackCustomerReview(input),
+    suggestions: generateFallbackSuggestions(input),
     source: "template",
   };
 }
 
 /**
- * Clean, natural editable starter templates when no extra notes are provided
+ * 6 Diverse Fallback Suggestions when OpenAI API is unavailable
  */
-function getStarterTemplate(service: string, rating: number, language: "en" | "hi" | "hinglish"): string {
-  const serviceLabel = service === "Other" ? "car care service" : service;
-
-  if (language === "hi") {
-    if (rating >= 4) {
-      return `3D Car Care Centre से ${serviceLabel} की सर्विस ली। काम बहुत बढ़िया और फिनिशिंग शानदार हुई। टीम का काम प्रोफेशनल है। संतुष्ट अनुभव!`;
-    } else if (rating === 3) {
-      return `3D Car Care Centre में अपनी कार का ${serviceLabel} करवाया। काम ठीक-ठाक रहा, लेकिन कुछ और बेहतर फिनिशिंग की उम्मीद थी।`;
-    } else {
-      return `3D Car Care Centre से ${serviceLabel} की सर्विस ली थी। मेरा अनुभव उम्मीद के मुताबिक संतोषजनक नहीं रहा। उम्मीद है इस पर ध्यान दिया जाएगा।`;
-    }
-  }
-
-  if (language === "hinglish") {
-    if (rating >= 4) {
-      return `3D Car Care Centre Indore me ${serviceLabel} karwaya. Kaam bohot hi badiya aur finishing top-notch hai. Team professional hai. Highly recommended!`;
-    } else if (rating === 3) {
-      return `3D Car Care Centre se ${serviceLabel} karwaya tha. Average to decent experience raha, finishing me thoda aur dhyan diya ja sakta hai.`;
-    } else {
-      return `3D Car Care Centre me ${serviceLabel} karwaya, but experience expectations ke hisaab se sahi nahi raha. Feedback par dhyan dena chahiye.`;
-    }
-  }
-
-  // English starter template
-  if (rating >= 4) {
-    return `Got ${serviceLabel} done at 3D Car Care Centre Indore. Extremely satisfied with the workmanship and attention to detail. Great team and great finish!`;
-  } else if (rating === 3) {
-    return `Visited 3D Car Care Centre for ${serviceLabel}. Decent service overall, with room for minor improvements in finishing.`;
-  } else {
-    return `Had my car in for ${serviceLabel} at 3D Car Care Centre. Unfortunately, the experience did not meet my expectations.`;
-  }
-}
-
-/**
- * Fallback generator when customer provided notes but OpenAI is unavailable
- */
-function generateFallbackCustomerReview(input: SimplifiedReviewInput): string {
+function generateFallbackSuggestions(input: SimplifiedReviewInput): ReviewSuggestion[] {
+  const service = input.service || "Car Care";
   const note = (input.feedback || "").trim();
-  const serviceLabel = input.service === "Other" ? "car care service" : input.service;
+  const rating = input.rating || 5;
+  const isPositive = rating >= 4;
 
   if (input.language === "hi") {
-    if (input.rating >= 4) {
-      return `3D Car Care Centre से ${serviceLabel} करवाया। ${note ? `${note}। ` : ""}काम वाकई बहुत शानदार हुआ और टीम का व्यवहार भी काफी अच्छा था।`;
-    } else if (input.rating === 3) {
-      return `3D Car Care Centre में ${serviceLabel} का काम करवाया। ${note ? `${note}। ` : ""}अनुभव सामान्य रहा।`;
+    if (isPositive) {
+      return [
+        {
+          id: 1,
+          styleLabel: "Short & Simple",
+          text: `3D Car Care Centre से ${service} करवाया। काम बहुत साफ और समय पर पूरा हुआ। पूरी तरह संतुष्ट!`,
+        },
+        {
+          id: 2,
+          styleLabel: "Detailed Experience",
+          text: `इंदौर में 3D Car Care से ${service} की सर्विस ली। ${note ? `${note}। ` : ""}गाड़ी की चमक और फिनिशिंग देखते ही बनती है। टीम ने बहुत बारीकी से काम किया।`,
+        },
+        {
+          id: 3,
+          styleLabel: "Professional",
+          text: `3D Car Care Centre में कुशल स्टाफ और उच्च स्तरीय डिटेलिंग कार्यप्रणाली देखने को मिली। ${service} के बाद गाड़ी की स्थिति बिल्कुल नई जैसी है।`,
+        },
+        {
+          id: 4,
+          styleLabel: "Friendly & Conversational",
+          text: `अपनी कार के लिए 3D Car Care चुना और अनुभव बहुत सुखद रहा। ${note ? `${note}। ` : ""}स्टाफ बहुत विनम्र और मददगार है। बहुत-बहुत धन्यवाद!`,
+        },
+        {
+          id: 5,
+          styleLabel: "Local Hinglish",
+          text: `3D Car Care Indore me ${service} karwaya tha. Kaam ek number hua hai! Finishing aur shine showroom condition jaisi hai. Best detailing studio!`,
+        },
+        {
+          id: 6,
+          styleLabel: "Unique Personal Style",
+          text: `गाड़ी की सही देखभाल के लिए 3D Car Care इंदौर सबसे भरोसेमंद जगह लगी। ${service} में जो परफेक्शन मिला, उससे मन खुश हो गया।`,
+        },
+      ];
     } else {
-      return `3D Car Care Centre से ${serviceLabel} की सर्विस ली। ${note ? `${note}। ` : ""}काम से पूरी तरह संतुष्ट नहीं हूं।`;
+      return [
+        {
+          id: 1,
+          styleLabel: "Short & Simple",
+          text: `3D Car Care Centre से ${service} लिया। काम सामान्य रहा।`,
+        },
+        {
+          id: 2,
+          styleLabel: "Detailed Experience",
+          text: `3D Car Care में ${service} करवाया। ${note ? `${note}। ` : ""}कुछ बिंदुओं पर फिनिशिंग बेहतर हो सकती थी।`,
+        },
+        {
+          id: 3,
+          styleLabel: "Professional",
+          text: `3D Car Care Centre से सेवा ली। उम्मीद है कि प्रबंधन गुणवत्ता नियंत्रण पर और ध्यान देगा।`,
+        },
+        {
+          id: 4,
+          styleLabel: "Friendly & Conversational",
+          text: `मेरा अनुभव औसत रहा। स्टाफ ठीक था लेकिन काम उम्मीद से थोड़ा कम रहा।`,
+        },
+        {
+          id: 5,
+          styleLabel: "Local Hinglish",
+          text: `3D Car Care me ${service} karwaya, average experience raha. Finishing aur better expect kar raha tha.`,
+        },
+        {
+          id: 6,
+          styleLabel: "Unique Personal Style",
+          text: `ईमानदार फीडबैक: ${service} का काम ठीक-ठाक था, लेकिन सुधार की काफी गुंजाइश है।`,
+        },
+      ];
     }
   }
 
   if (input.language === "hinglish") {
-    if (input.rating >= 4) {
-      return `3D Car Care Centre Indore se ${serviceLabel} karwaya. ${note ? `${note}. ` : ""}Kaam aur finishing dono top quality ka hua hai. Bahut achha experience raha!`;
-    } else if (input.rating === 3) {
-      return `3D Car Care Centre me ${serviceLabel} karwaya tha. ${note ? `${note}. ` : ""}Decent work raha overall.`;
+    if (isPositive) {
+      return [
+        {
+          id: 1,
+          styleLabel: "Short & Simple",
+          text: `3D Car Care Indore me ${service} karwaya. Finishing aur shine top class hai. Super satisfied!`,
+        },
+        {
+          id: 2,
+          styleLabel: "Detailed Experience",
+          text: `Recently visited 3D Car Care Centre for ${service}. ${note ? `${note}. ` : ""}Gadi bilkul showroom condition me wapas mili. Detailing work was deeply satisfying.`,
+        },
+        {
+          id: 3,
+          styleLabel: "Professional",
+          text: `Impressed with the methodical execution of ${service} at 3D Car Care Centre Indore. Professional team and punctual handover.`,
+        },
+        {
+          id: 4,
+          styleLabel: "Friendly & Conversational",
+          text: `Bohot hi accha experience raha 3D Car Care ke sath! ${note ? `${note}. ` : ""}Team bohot polite thi aur har cheez ache se samjhayi. Thanks guys!`,
+        },
+        {
+          id: 5,
+          styleLabel: "Local Hinglish",
+          text: `Indore me car detailing ke liye 3D Car Care Centre sach me best laga. ${service} me jo finishing aayi hai, gadi alag hi chamak rahi hai!`,
+        },
+        {
+          id: 6,
+          styleLabel: "Unique Personal Style",
+          text: `Apni car ki care ke liye best choice. ${service} was done with supreme attention to detail. Great value for car enthusiasts in Indore!`,
+        },
+      ];
     } else {
-      return `3D Car Care Centre me ${serviceLabel} karwaya tha. ${note ? `${note}. ` : ""}Experience expectations ke mutabik nahi raha.`;
+      return [
+        {
+          id: 1,
+          styleLabel: "Short & Simple",
+          text: `3D Car Care Indore se ${service} karwaya. Experience was just average.`,
+        },
+        {
+          id: 2,
+          styleLabel: "Detailed Experience",
+          text: `Had my vehicle in for ${service}. ${note ? `${note}. ` : ""}Finishing could definitely have been more refined.`,
+        },
+        {
+          id: 3,
+          styleLabel: "Professional",
+          text: `Received ${service} at 3D Car Care Centre. Sharing constructive feedback for the management to inspect.`,
+        },
+        {
+          id: 4,
+          styleLabel: "Friendly & Conversational",
+          text: `Decent work overall, but unfortunately did not fully meet expectations for ${service}.`,
+        },
+        {
+          id: 5,
+          styleLabel: "Local Hinglish",
+          text: `3D Car Care me ${service} karwaya tha but thoda disappointed raha. Hope team finishing aur quality pe focus karegi.`,
+        },
+        {
+          id: 6,
+          styleLabel: "Unique Personal Style",
+          text: `Honest review: ${service} was average. Expected higher perfection for the price paid.`,
+        },
+      ];
     }
   }
 
-  // English fallback
-  if (input.rating >= 4) {
-    return `Got ${serviceLabel} done at 3D Car Care Centre Indore. ${note ? `${note}. ` : ""}Really impressed with the quality and finishing. Would definitely recommend!`;
-  } else if (input.rating === 3) {
-    return `Visited 3D Car Care Centre for ${serviceLabel}. ${note ? `${note}. ` : ""}Fair and decent experience overall.`;
+  // English Variations
+  if (isPositive) {
+    return [
+      {
+        id: 1,
+        styleLabel: "Short & Simple",
+        text: `Got ${service} done at 3D Car Care Centre Indore. Flawless finish and on-time handover. Thoroughly satisfied!`,
+      },
+      {
+        id: 2,
+        styleLabel: "Detailed Experience",
+        text: `Brought my vehicle to 3D Car Care Centre for ${service}. ${note ? `${note}. ` : ""}The gloss and attention to intricate edges were remarkable. Truly restored that showroom look.`,
+      },
+      {
+        id: 3,
+        styleLabel: "Professional",
+        text: `Exemplary detailing standards at 3D Car Care Centre Indore. Their execution of ${service} demonstrated superior technical proficiency and thorough quality control.`,
+      },
+      {
+        id: 4,
+        styleLabel: "Friendly & Conversational",
+        text: `So glad I chose 3D Car Care for my car! ${note ? `${note}. ` : ""}The staff were welcoming, courteous, and took genuine care of every little detail. Big thanks to the crew!`,
+      },
+      {
+        id: 5,
+        styleLabel: "Local Hinglish",
+        text: `3D Car Care Centre Indore me ${service} karwaya tha. Kaam sach me top-notch hua hai! Showroom jaisi shine wapas aa gayi. Truly value for money.`,
+      },
+      {
+        id: 6,
+        styleLabel: "Unique Personal Style",
+        text: `Finding a workshop with genuine passion for car aesthetics is rare. 3D Car Care delivered exceptional results on ${service}. A premier detailing studio in Indore!`,
+      },
+    ];
   } else {
-    return `Visited 3D Car Care Centre for ${serviceLabel}. ${note ? `${note}. ` : ""}The service did not meet my expectations.`;
+    return [
+      {
+        id: 1,
+        styleLabel: "Short & Simple",
+        text: `Visited 3D Car Care Centre for ${service}. The experience was average and had room for improvement.`,
+      },
+      {
+        id: 2,
+        styleLabel: "Detailed Experience",
+        text: `Had ${service} performed at 3D Car Care. ${note ? `${note}. ` : ""}While parts of the job were fine, some specific areas needed much finer attention.`,
+      },
+      {
+        id: 3,
+        styleLabel: "Professional",
+        text: `Providing constructive evaluation regarding ${service} at 3D Car Care Centre. Expected a higher caliber of consistency for this tier of service.`,
+      },
+      {
+        id: 4,
+        styleLabel: "Friendly & Conversational",
+        text: `The team was polite, but unfortunately the outcome of ${service} did not quite match what was anticipated.`,
+      },
+      {
+        id: 5,
+        styleLabel: "Local Hinglish",
+        text: `3D Car Care Centre me ${service} karwaya tha, average experience raha. Finishing aur improve ho sakti thi.`,
+      },
+      {
+        id: 6,
+        styleLabel: "Unique Personal Style",
+        text: `Fair assessment: The ${service} was acceptable, but greater diligence in quality inspection is needed.`,
+      },
+    ];
   }
+}
+
+/**
+ * Backwards compatibility helper
+ */
+export async function generateCustomerReview(input: SimplifiedReviewInput): Promise<{
+  review: string;
+  source: "openai" | "template";
+}> {
+  const res = await generateCustomerReviewSuggestions(input);
+  return {
+    review: res.suggestions[0]?.text || "",
+    source: res.source,
+  };
 }
 
 /**

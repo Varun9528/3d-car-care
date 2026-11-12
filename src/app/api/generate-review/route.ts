@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateCustomerReview, SimplifiedReviewInput } from "@/lib/openai";
+import { generateCustomerReviewSuggestions, SimplifiedReviewInput } from "@/lib/openai";
 
 export async function POST(req: NextRequest) {
   try {
@@ -26,11 +26,12 @@ export async function POST(req: NextRequest) {
       language,
     };
 
-    const result = await generateCustomerReview(input);
+    const result = await generateCustomerReviewSuggestions(input);
 
     return NextResponse.json({
       success: true,
-      review: result.review,
+      suggestions: result.suggestions,
+      review: result.suggestions[0]?.text || "",
       source: result.source,
     });
   } catch (err: unknown) {

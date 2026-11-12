@@ -15,13 +15,15 @@ import {
   Send,
   AlertCircle,
   RotateCcw,
+  Check,
 } from "lucide-react";
 import { COMPACT_SERVICES, BUSINESS_CONFIG, CompactService } from "@/lib/services-data";
+import { ReviewSuggestion } from "@/lib/openai";
 import NfcCardPrintable from "./NfcCardPrintable";
 
 type Language = "en" | "hi" | "hinglish";
 
-const SESSION_STORAGE_KEY = "3d_car_care_session_review";
+const SESSION_STORAGE_KEY = "3d_car_care_session_review_v2";
 
 export default function ReviewHub() {
   const [language, setLanguage] = useState<Language>("en");
@@ -30,7 +32,11 @@ export default function ReviewHub() {
   const [hoverRating, setHoverRating] = useState<number>(0);
   const [experienceText, setExperienceText] = useState<string>("");
 
+  // 6 Review Suggestions & Selected Review
+  const [suggestions, setSuggestions] = useState<ReviewSuggestion[]>([]);
+  const [selectedSuggestionId, setSelectedSuggestionId] = useState<number | null>(null);
   const [generatedReview, setGeneratedReview] = useState<string>("");
+
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
   const [hasOpenedGoogle, setHasOpenedGoogle] = useState<boolean>(false);
@@ -47,7 +53,7 @@ export default function ReviewHub() {
   const reviewResultId = useId();
   const reviewTextareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Restore state across browser tabs using sessionStorage (temporary, not permanent)
+  // Restore state across browser tabs using sessionStorage
   useEffect(() => {
     if (typeof window !== "undefined") {
       setYear(new Date().getFullYear());
@@ -66,6 +72,10 @@ export default function ReviewHub() {
         const saved = sessionStorage.getItem(SESSION_STORAGE_KEY);
         if (saved) {
           const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed.suggestions) && parsed.suggestions.length > 0) {
+            setSuggestions(parsed.suggestions);
+          }
+          if (parsed.selectedSuggestionId) setSelectedSuggestionId(parsed.selectedSuggestionId);
           if (parsed.review) setGeneratedReview(parsed.review);
           if (parsed.rating) setRating(parsed.rating);
           if (parsed.service) setSelectedService(parsed.service);
@@ -95,10 +105,12 @@ export default function ReviewHub() {
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
-        if (generatedReview) {
+        if (suggestions.length > 0 || generatedReview) {
           sessionStorage.setItem(
             SESSION_STORAGE_KEY,
             JSON.stringify({
+              suggestions,
+              selectedSuggestionId,
               review: generatedReview,
               rating,
               service: selectedService,
@@ -111,9 +123,11 @@ export default function ReviewHub() {
         console.warn("Session storage save error:", e);
       }
     }
-  }, [generatedReview, rating, selectedService, experienceText, hasOpenedGoogle]);
+  }, [suggestions, selectedSuggestionId, generatedReview, rating, selectedService, experienceText, hasOpenedGoogle]);
 
   const handleClearDraft = () => {
+    setSuggestions([]);
+    setSelectedSuggestionId(null);
     setGeneratedReview("");
     setExperienceText("");
     setRating(0);
@@ -138,7 +152,7 @@ export default function ReviewHub() {
           ? "कृपया आगे बढ़ने के लिए 1 से 5 स्टार रेटिंग चुनें।"
           : language === "hinglish"
           ? "Please pehle 1 se 5 star rating select karein."
-          : "Please tap a star rating (1 to 5) to generate your review."
+          : "Please tap a star rating (1 to 5) to generate your reviews."
       );
       return;
     }
@@ -161,17 +175,27 @@ export default function ReviewHub() {
       });
 
       const data = await res.json();
-      if (data.success && data.review) {
-        setGeneratedReview(data.review);
+      if (data.success && Array.isArray(data.suggestions) && data.suggestions.length > 0) {
+        setSuggestions(data.suggestions);
+        // Default to the first option or keep current
+        setSelectedSuggestionId(1);
+        setGeneratedReview(data.suggestions[0].text);
       } else {
-        setErrorMessage(data.error || "Failed to generate review. Please try again.");
+        setErrorMessage(data.error || "Failed to generate reviews. Please try again.");
       }
     } catch (err) {
-      console.error("Generate review error:", err);
+      console.error("Generate reviews error:", err);
       setErrorMessage("Network issue. Please try again.");
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const handleSelectSuggestion = (sug: ReviewSuggestion) => {
+    setSelectedSuggestionId(sug.id);
+    setGeneratedReview(sug.text);
+    setCopied(false);
+    setHasOpenedGoogle(false);
   };
 
   const fallbackCopyText = (text: string): boolean => {
@@ -271,16 +295,16 @@ export default function ReviewHub() {
         : "Tell us what you liked about our service...",
     btnGenerate:
       language === "hi"
-        ? "✦ मेरा रिव्यू बनाएं"
+        ? "✦ 6 रिव्यू विकल्प बनाएं"
         : language === "hinglish"
-        ? "✦ Generate My Review"
-        : "✦ Generate My Review",
+        ? "✦ Generate 6 Review Options"
+        : "✦ Generate 6 Review Options",
     btnGenerating:
       language === "hi"
-        ? "रिव्यू तैयार हो रहा है..."
+        ? "6 विकल्प तैयार हो रहे हैं..."
         : language === "hinglish"
-        ? "Generating Review..."
-        : "Generating Review...",
+        ? "Generating 6 Options..."
+        : "Generating 6 Options...",
     ratingLabels: {
       1: language === "hi" ? "निराशाजनक (1/5)" : "Disappointing (1/5)",
       2: language === "hi" ? "सुधार की जरूरत (2/5)" : "Needs Improvement (2/5)",
@@ -288,12 +312,14 @@ export default function ReviewHub() {
       4: language === "hi" ? "बहुत अच्छा (4/5)" : "Very Good (4/5)",
       5: language === "hi" ? "शानदार (5/5)" : "Outstanding (5/5)",
     },
+    suggestionsHeader:
+      language === "hi" ? "अपना पसंदीदा रिव्यू चुनें (6 विकल्प)" : "Choose Your Preferred Review (6 Options)",
     reviewResultLabel:
-      language === "hi" ? "आपका रिव्यू (एडिट कर सकते हैं)" : "Your Review (Editable)",
+      language === "hi" ? "चयनित रिव्यू (एडिट कर सकते हैं)" : "Selected Review (Editable)",
     btnCopyAndOpenGoogle:
       language === "hi"
-        ? "COPY & OPEN GOOGLE REVIEW"
-        : "COPY & OPEN GOOGLE REVIEW",
+        ? "COPY SELECTED REVIEW & OPEN GOOGLE"
+        : "COPY SELECTED REVIEW & OPEN GOOGLE",
     successMessage:
       language === "hi"
         ? "आपका रिव्यू कॉपी हो गया है! Google पर पेस्ट करें, स्टार रेटिंग चुनें और Post दबाएं।"
@@ -304,8 +330,8 @@ export default function ReviewHub() {
       language === "hi" ? "2. Google में पेस्ट करें" : "2. Paste in Google Box",
     step3Guide:
       language === "hi" ? "3. स्टार चुनें & सबमिट करें" : "3. Select Stars & Post",
-    regenerate:
-      language === "hi" ? "पुनः बनाएं (Regenerate)" : "Regenerate Review",
+    regenerateAll:
+      language === "hi" ? "6 नए विकल्प बनाएं" : "Regenerate All 6",
   };
 
   return (
@@ -376,7 +402,6 @@ export default function ReviewHub() {
           <div className="grid grid-cols-2 gap-2">
             {COMPACT_SERVICES.map((s: CompactService, idx: number) => {
               const isSelected = selectedService === s.name;
-              // Make the 5th item ('Other') span across on 2-col layout
               const isLastAndOdd = idx === COMPACT_SERVICES.length - 1 && COMPACT_SERVICES.length % 2 !== 0;
 
               return (
@@ -399,7 +424,7 @@ export default function ReviewHub() {
           </div>
         </div>
 
-        {/* 3. CUSTOMER INPUT B: RATE EXPERIENCE (5 INTERACTIVE STARS, UNSELECTED BY DEFAULT) */}
+        {/* 3. CUSTOMER INPUT B: RATE EXPERIENCE (5 INTERACTIVE STARS) */}
         <div className="flex flex-col items-center text-center gap-1.5 py-1">
           <label className="text-xs font-extrabold uppercase tracking-wider text-neutral-300">
             {t.ratingLabel}
@@ -459,7 +484,7 @@ export default function ReviewHub() {
           </div>
         )}
 
-        {/* 5. GENERATE REVIEW BUTTON */}
+        {/* 5. GENERATE REVIEWS BUTTON */}
         <div>
           <button
             type="button"
@@ -475,126 +500,198 @@ export default function ReviewHub() {
             ) : (
               <>
                 <Sparkles className="w-4 h-4 fill-black" />
-                <span>{generatedReview ? t.regenerate : t.btnGenerate}</span>
+                <span>{suggestions.length > 0 ? t.regenerateAll : t.btnGenerate}</span>
               </>
             )}
           </button>
         </div>
 
-        {/* 6. GENERATED EDITABLE REVIEW & SUBMISSION WORKFLOW */}
-        {generatedReview && (
-          <div className="flex flex-col gap-3 pt-2 border-t border-[#303630]/60 animate-in fade-in slide-in-from-bottom-2 duration-200">
+        {/* ========================================================
+            6. MULTIPLE REVIEW SUGGESTIONS LIST (6 DISTINCT OPTIONS)
+           ======================================================== */}
+        {suggestions.length > 0 && (
+          <div className="flex flex-col gap-3 pt-3 border-t border-[#303630]/60 animate-in fade-in slide-in-from-bottom-2 duration-200">
             <div className="flex items-center justify-between">
               <span className="text-xs font-black uppercase text-[#65F000] tracking-wider">
-                {t.reviewResultLabel}
+                {t.suggestionsHeader}
               </span>
-              <div className="flex items-center gap-2">
-                <div className="flex text-[#65F000]">
-                  {Array.from({ length: rating || 5 }).map((_, i) => (
-                    <Star key={i} className="w-3.5 h-3.5 fill-[#65F000]" />
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  onClick={handleClearDraft}
-                  title="Clear draft"
-                  className="p-1 rounded-md text-neutral-400 hover:text-white hover:bg-[#080B09] transition-colors"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={handleGenerateReview}
+                disabled={isGenerating}
+                className="text-[11px] font-bold text-neutral-400 hover:text-[#65F000] flex items-center gap-1 transition-colors cursor-pointer"
+              >
+                <RefreshCw className={`w-3 h-3 ${isGenerating ? "animate-spin" : ""}`} />
+                <span>{t.regenerateAll}</span>
+              </button>
             </div>
 
-            {/* Editable Textarea with live ref */}
-            <textarea
-              ref={reviewTextareaRef}
-              id={reviewResultId}
-              rows={3}
-              value={generatedReview}
-              onChange={(e) => setGeneratedReview(e.target.value)}
-              className="w-full bg-[#080B09] border border-[#303630] rounded-xl p-3 text-xs sm:text-sm text-white leading-relaxed focus:outline-none focus:border-[#65F000] transition-colors resize-none"
-            />
-
-            {/* ONE PRIMARY BUTTON: COPY & OPEN GOOGLE REVIEW (SYNCHRONOUS TO PREVENT POPUP BLOCKING) */}
-            <a
-              href={BUSINESS_CONFIG.googleReviewWriteUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={handleAnchorClick}
-              className="w-full min-h-[50px] py-3.5 px-4 rounded-xl font-black text-xs sm:text-sm text-black bg-[#65F000] hover:bg-[#70FF00] active:scale-[0.99] transition-all flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(101,240,0,0.35)] cursor-pointer text-center no-underline"
-            >
-              <Copy className="w-4 h-4 stroke-[2.5]" />
-              <span className="tracking-wide uppercase">{t.btnCopyAndOpenGoogle}</span>
-              <ExternalLink className="w-4 h-4 stroke-[2.5]" />
-            </a>
-
-            {/* SUCCESS BANNER & 3-STEP VISUAL INSTRUCTIONS */}
-            {hasOpenedGoogle && (
-              <div className="bg-[#080B09] border border-[#65F000]/40 rounded-xl p-3 flex flex-col gap-2.5 animate-in fade-in duration-200">
-                <div className="flex items-start gap-2 text-left">
-                  <CheckCircle2 className="w-4 h-4 text-[#65F000] shrink-0 mt-0.5" />
-                  <p className="text-xs font-bold text-white leading-snug">
-                    {t.successMessage}
-                  </p>
-                </div>
-
-                {/* 3 Step Visual Guide */}
-                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-[#303630]/60">
-                  <div className="flex flex-col items-center text-center p-2 rounded-lg bg-[#121614] border border-[#303630]">
-                    <div className="w-6 h-6 rounded-full bg-[#65F000]/20 text-[#65F000] flex items-center justify-center mb-1">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                    </div>
-                    <span className="text-[10px] font-extrabold text-white leading-tight">
-                      {t.step1Guide}
-                    </span>
-                  </div>
-
-                  <div className="flex flex-col items-center text-center p-2 rounded-lg bg-[#121614] border border-[#303630]">
-                    <div className="w-6 h-6 rounded-full bg-[#65F000]/20 text-[#65F000] flex items-center justify-center mb-1">
-                      <ClipboardPaste className="w-3.5 h-3.5" />
-                    </div>
-                    <span className="text-[10px] font-extrabold text-white leading-tight">
-                      {t.step2Guide}
-                    </span>
-                  </div>
-
-                  <div className="flex flex-col items-center text-center p-2 rounded-lg bg-[#121614] border border-[#303630]">
-                    <div className="w-6 h-6 rounded-full bg-[#65F000]/20 text-[#65F000] flex items-center justify-center mb-1">
-                      <Send className="w-3.5 h-3.5" />
-                    </div>
-                    <span className="text-[10px] font-extrabold text-white leading-tight">
-                      {t.step3Guide}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* FALLBACK IF CLIPBOARD ACCESS IS RESTRICTED */}
-            {clipboardFailed && (
-              <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-amber-950/60 border border-amber-800 text-left animate-in fade-in duration-150">
-                <div className="flex items-center gap-1.5 text-amber-300 text-xs font-bold">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>Clipboard write restricted by browser</span>
-                </div>
-                <div className="flex flex-wrap items-center gap-2 mt-0.5">
+            {/* 6 Selectable Review Cards */}
+            <div className="flex flex-col gap-2.5 max-h-[380px] overflow-y-auto pr-1">
+              {suggestions.map((sug) => {
+                const isSelected = selectedSuggestionId === sug.id;
+                return (
                   <button
+                    key={sug.id}
                     type="button"
-                    onClick={handleManualCopy}
-                    className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs cursor-pointer"
+                    onClick={() => handleSelectSuggestion(sug)}
+                    className={`text-left p-3 rounded-xl border transition-all duration-150 flex flex-col gap-1.5 cursor-pointer relative ${
+                      isSelected
+                        ? "bg-[#080B09] border-[#65F000] shadow-[0_0_15px_rgba(101,240,0,0.2)]"
+                        : "bg-[#080B09]/70 border-[#303630] hover:border-neutral-500 hover:bg-[#080B09]"
+                    }`}
                   >
-                    {copied ? "Copied!" : "Manual Copy Text"}
+                    <div className="flex items-center justify-between w-full">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`w-4 h-4 rounded-full text-[10px] font-black flex items-center justify-center ${
+                            isSelected ? "bg-[#65F000] text-black" : "bg-[#1E2521] text-neutral-400"
+                          }`}
+                        >
+                          {sug.id}
+                        </span>
+                        <span
+                          className={`text-[11px] font-extrabold uppercase tracking-wide ${
+                            isSelected ? "text-[#65F000]" : "text-neutral-400"
+                          }`}
+                        >
+                          {sug.styleLabel}
+                        </span>
+                      </div>
+
+                      {isSelected ? (
+                        <span className="flex items-center gap-1 text-[10px] font-bold text-[#65F000]">
+                          <Check className="w-3.5 h-3.5 stroke-[3]" />
+                          <span>Selected</span>
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-neutral-500">Tap to select</span>
+                      )}
+                    </div>
+
+                    <p className="text-xs text-neutral-200 leading-relaxed line-clamp-3">
+                      &quot;{sug.text}&quot;
+                    </p>
                   </button>
-                  <span className="text-[11px] text-neutral-300">
-                    or long-press inside the box above to copy.
+                );
+              })}
+            </div>
+
+            {/* Live Editable Textarea for Final Polish */}
+            {generatedReview && (
+              <div className="flex flex-col gap-2 pt-2 border-t border-[#303630]/60">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-extrabold uppercase text-neutral-300 tracking-wider">
+                    {t.reviewResultLabel}
                   </span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex text-[#65F000]">
+                      {Array.from({ length: rating || 5 }).map((_, i) => (
+                        <Star key={i} className="w-3.5 h-3.5 fill-[#65F000]" />
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleClearDraft}
+                      title="Clear review"
+                      className="p-1 rounded-md text-neutral-400 hover:text-white hover:bg-[#080B09] transition-colors"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
+
+                <textarea
+                  ref={reviewTextareaRef}
+                  id={reviewResultId}
+                  rows={3}
+                  value={generatedReview}
+                  onChange={(e) => setGeneratedReview(e.target.value)}
+                  className="w-full bg-[#080B09] border border-[#303630] rounded-xl p-3 text-xs sm:text-sm text-white leading-relaxed focus:outline-none focus:border-[#65F000] transition-colors resize-none"
+                />
+
+                {/* ONE PRIMARY BUTTON: COPY SELECTED REVIEW & OPEN GOOGLE */}
+                <a
+                  href={BUSINESS_CONFIG.googleReviewWriteUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={handleAnchorClick}
+                  className="w-full min-h-[50px] py-3.5 px-4 rounded-xl font-black text-xs sm:text-sm text-black bg-[#65F000] hover:bg-[#70FF00] active:scale-[0.99] transition-all flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(101,240,0,0.35)] cursor-pointer text-center no-underline"
+                >
+                  <Copy className="w-4 h-4 stroke-[2.5]" />
+                  <span className="tracking-wide uppercase">{t.btnCopyAndOpenGoogle}</span>
+                  <ExternalLink className="w-4 h-4 stroke-[2.5]" />
+                </a>
+
+                {/* SUCCESS BANNER & 3-STEP VISUAL INSTRUCTIONS */}
+                {hasOpenedGoogle && (
+                  <div className="bg-[#080B09] border border-[#65F000]/40 rounded-xl p-3 flex flex-col gap-2.5 animate-in fade-in duration-200">
+                    <div className="flex items-start gap-2 text-left">
+                      <CheckCircle2 className="w-4 h-4 text-[#65F000] shrink-0 mt-0.5" />
+                      <p className="text-xs font-bold text-white leading-snug">
+                        {t.successMessage}
+                      </p>
+                    </div>
+
+                    {/* 3 Step Visual Guide */}
+                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-[#303630]/60">
+                      <div className="flex flex-col items-center text-center p-2 rounded-lg bg-[#121614] border border-[#303630]">
+                        <div className="w-6 h-6 rounded-full bg-[#65F000]/20 text-[#65F000] flex items-center justify-center mb-1">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                        </div>
+                        <span className="text-[10px] font-extrabold text-white leading-tight">
+                          {t.step1Guide}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-col items-center text-center p-2 rounded-lg bg-[#121614] border border-[#303630]">
+                        <div className="w-6 h-6 rounded-full bg-[#65F000]/20 text-[#65F000] flex items-center justify-center mb-1">
+                          <ClipboardPaste className="w-3.5 h-3.5" />
+                        </div>
+                        <span className="text-[10px] font-extrabold text-white leading-tight">
+                          {t.step2Guide}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-col items-center text-center p-2 rounded-lg bg-[#121614] border border-[#303630]">
+                        <div className="w-6 h-6 rounded-full bg-[#65F000]/20 text-[#65F000] flex items-center justify-center mb-1">
+                          <Send className="w-3.5 h-3.5" />
+                        </div>
+                        <span className="text-[10px] font-extrabold text-white leading-tight">
+                          {t.step3Guide}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* FALLBACK IF CLIPBOARD ACCESS IS RESTRICTED */}
+                {clipboardFailed && (
+                  <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-amber-950/60 border border-amber-800 text-left animate-in fade-in duration-150">
+                    <div className="flex items-center gap-1.5 text-amber-300 text-xs font-bold">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>Clipboard write restricted by browser</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                      <button
+                        type="button"
+                        onClick={handleManualCopy}
+                        className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs cursor-pointer"
+                      >
+                        {copied ? "Copied!" : "Manual Copy Text"}
+                      </button>
+                      <span className="text-[11px] text-neutral-300">
+                        or long-press inside the box above to copy.
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
         )}
 
-        {/* 7. NFC & QR PRINT BUTTON (Inside the card at bottom) */}
+        {/* 7. NFC & QR PRINT BUTTON */}
         <div className="pt-2 border-t border-[#303630]/60 flex items-center justify-between">
           <div className="text-[11px] text-neutral-400">
             NFC &amp; QR Business Cards
