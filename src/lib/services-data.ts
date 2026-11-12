@@ -6,7 +6,7 @@ export interface CompactService {
 
 export const COMPACT_SERVICES: CompactService[] = [
   { id: "ppf", name: "PPF", nameHindi: "पीपीएफ (PPF)" },
-  { id: "ceramic-graphene", name: "Ceramic / Graphene", nameHindi: "सिरेमिक / ग्राफीन" },
+  { id: "ceramic-graphene", name: "Ceramic / Graphene Coating", nameHindi: "सिरेमिक / ग्राफीन कोटिंग" },
   { id: "car-wash", name: "Car Wash", nameHindi: "कार वॉश" },
   { id: "detailing", name: "Detailing", nameHindi: "डिटेलिंग" },
   { id: "other", name: "Other", nameHindi: "अन्य सेवा" },
